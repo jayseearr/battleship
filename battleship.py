@@ -10,13 +10,15 @@ import numpy as np
 import matplotlib as mpl
 from matplotlib import pyplot as plt
 import re
-from enum import Enum
+from enum import Enum, IntEnum
 
+#%%
 # Constants
 LETTER_OFFSET = 65
 DEFAULT_BOARD_SIZE = 10
+MAX_ITER = 1000
 
-class ShipId(Enum):
+class ShipType(IntEnum):
     PATROL = 1
     DESTROYER = 2
     SUBMARINE = 3
@@ -24,28 +26,23 @@ class ShipId(Enum):
     CARRIER = 5
     
 # Enums
-class Space(Enum):
-    """An Enum used to track hits/misses on a board's target map.
+class TargetValue(IntEnum):
+    """An Enum used to track hits/misses on a board's target grid.
     Can be compared for equality to integers."""
     UNKNOWN = -2
     MISS = -1
     HIT = 0
-    def __eq__(self, other):
-         if self.__class__ is other.__class__:
-             return self.value == other.value
-         elif isinstance(other,int):
-             return self.value == other
-         return NotImplemented
     
 ### Data
-SHIP_DATA = {ShipId.PATROL: {"name": "Patrol".title(), "length": 2},
-             ShipId.DESTROYER: {"name": "Destroyer".title(), "length": 3},
-             ShipId.SUBMARINE: {"name": "Submarine".title(), "length": 3},
-             ShipId.BATTLESHIP: {"name": "Battleship".title(), "length": 4},
-             ShipId.CARRIER: {"name": "Carrier".title(), "length": 5}
+SHIP_DATA = {ShipType.PATROL: {"name": "Patrol".title(), "length": 2},
+             ShipType.DESTROYER: {"name": "Destroyer".title(), "length": 3},
+             ShipType.SUBMARINE: {"name": "Submarine".title(), "length": 3},
+             ShipType.BATTLESHIP: {"name": "Battleship".title(), "length": 4},
+             ShipType.CARRIER: {"name": "Carrier".title(), "length": 5}
              }
 
-# -----------------------------------------------------------------------------
+#%% Functions
+
 def random_choice(x, p=None):
     """Returns a single randomly sampled element from the input list, tuple,
     or array."""
@@ -71,7 +68,92 @@ def battleship_sim(ngames):
         p2.reset()
     return np.array(winner), np.array(nturns)
 
-# -----------------------------------------------------------------------------
+#%% Coord Class
+
+class Coord:
+    """A class that represents a single space on the Battleship board. A
+    coord instance may be represented as a pair of row/column indices or as
+    a letter/number string.
+    
+    A new instance of Coord can be created using either row/column list or
+    tuple, or a string with a letter and digit.
+    
+    Instances of this class can be compared for equality to one another 
+    (i.e., Coord([9,4]) == Coord("J5") is True).
+    """
+    def __init__(self, a, b=None):
+        if b is not None:
+            r = a
+            c = b
+            if not (isinstance(a,(int,np.integer)) and 
+                    isinstance(b,(int,np.integer))):
+                raise ValueError("When specifying a Coord with 2 arguments, they "
+                                 "must both be integers.")
+        elif isinstance(a, list):
+            if isinstance(a[0], int) and len(a) == 2:
+                r,c = a[0], a[1]
+            else:
+                raise ValueError("Cannot create a Coord out of a list unless "
+                                 "it has only 2 elements.")
+        elif isinstance(a, tuple):
+            r,c = a
+        elif isinstance(a, str):
+            r,c = self._str_to_rc(a)
+
+        self._rowcol = r,c
+        self._value = None
+        
+    def _str_to_rc(self, s):
+        """Returns a string with a letter and number (1 or 2 digits) that
+        correspond to the Coord's row and column values.
+        """        
+        r = ord(s[0].upper()) - LETTER_OFFSET
+        c = int(s[1:]) - 1
+        return r,c
+    
+    @property
+    def rowcol(self):
+        """Returns a tuple with the row and column values describing the 
+        Coord's location."""
+        return self._rowcol
+    
+    @property
+    def lbl(self):
+        """Returns a string description of the Coord's location, such as 
+        A1, C5, J3, etc.
+        """
+        return f"{chr(self._rowcol[0] + LETTER_OFFSET)}{self._rowcol[1]+1}"
+    
+    @property
+    def value(self):
+        """Returns the current value of the Coord's value variable (a scalar).
+        """
+        return self._value
+    
+    @value.setter
+    def value(self, x):
+        """Set the Coord's value variable to input scalar x."""
+        self._value = x
+        
+    def __str__(self):
+        """Returns the label strings for the Coord's location."""
+        return self.lbl
+    
+    def __eq__(self, other):
+        """Compares the Coord's row/column and value (if any) variables. 
+        If they are the same as the second item in the comparison, the two 
+        instances are equal.
+        """
+        return self._rowcol == other.rowcol and self._value == other.value
+    
+    def __getitem__(self, key):
+        """Returns the row or column value of the Coord for key = 0 and key = 1,
+        respectively.
+        """
+        return self._rowcol[key]
+    
+#%% Game Class
+
 class Game:
     
     def __init__(self, player1, player2, 
@@ -178,11 +260,9 @@ class Game:
             
         # See who won
         if first_player.still_alive():
-            self.winner = first_player
-            self.loser = second_player
+            self.winner, self.loser = first_player, second_player
         else:
-            self.winner = second_player
-            self.loser = first_player
+            self.winner, self.loser = second_player, first_player
         
         if self.verbose:
             self.print_outcome()
@@ -202,7 +282,7 @@ class Game:
         else:
             hit_or_miss = "Miss."
         if outcome["sunk_ship_id"]:
-            sink = SHIP_DATA[ShipId(outcome["sunk_ship_id"])]["name"] + " sunk!"
+            sink = SHIP_DATA[outcome["sunk_ship_id"]]["name"] + " sunk!"
         print(f"Turn {len(player.shot_log)}: Player {name} fired a shot at "
               f"{target}...{hit_or_miss} {sink}")
         
@@ -222,8 +302,8 @@ class Game:
         print("Game length: " + str(self.turn_count) + " turns.")
         print("(Game ID: " + str(self.game_id) + ")")
         print("")
-        
-# -----------------------------------------------------------------------------
+            
+# %% Player Class
 class Player:
     """A Battleship player that has access to a board on which a game
     can be played. The player can be human or AI. In the case of human,
@@ -262,7 +342,7 @@ class Player:
         self.board = Board()
         self.opponent = None
         self.remaining_targets = self.board.all_coords()
-        self.return_all_possibilities = False
+        self.possible_targets = []
         
         self.game_history = None    # for future use
         self.notes = None           # for future use
@@ -295,61 +375,58 @@ class Player:
         """Returns the opponent's Board."""
         return self.opponent.board
         
+    def random_ship_placement(self, method, ship_id=None):
+        """Returns a random ship placement (Coord and heading) for the input 
+        method and ship type.
+        """ 
+        if method == "random":
+            index = self.board.random_index(unoccuppied=True)
+            heading = self.board.random_heading()
+            
+        elif method in ["cluster", "clustered"]:
+            X,Y = np.meshgrid(range(self.board.size), range(self.board.size))
+            D = np.zeros(X.shape)
+            for ship in list(self.board.fleet.values()):
+                rows,cols = zip(*self.board.index_for_ship(ship))
+                for (r,c) in zip(rows,cols): 
+                    D = D + (X - c)**2 + (Y - r)**2
+            indices = self.board.unoccuppied_indices()
+            prob = np.zeros(len(indices))
+            for (i,rc) in enumerate(indices):
+                prob[i] = 1 / (1 + D[rc[0],rc[1]])
+            prob = np.array(prob)
+            prob = prob / np.sum(prob)
+            index = indices[np.random.choice(range(len(indices)), 
+                                             size=1, 
+                                             p = prob)[0]]
+            heading = self.board.random_heading()
+            
+        elif (method == "isolated" or method in 
+              ["veryisolated", "very.isolated", "very isolated", 
+               "very_isolated", "isolated+"]):
+            # find a placement that is not touching another ship
+            sites = self.board.all_valid_placements(
+                SHIP_DATA[ShipType(ship_id)]["length"],
+                distance=1, diagonal=(method != "isolated"))
+            index, heading = sites[np.random.choice(range(len(sites)))]
+        
+        return index, heading
+    
     def place_fleet_randomly(self, method):
         """Places all 5 ships randomly on the board, with randomization method
         set by the 'method' input. This input can be 'random', 'cluster', 
         'isolated', or 'very.isolated'.
         """
         method = method.lower()
-        for ship_id in range(1,len(SHIP_DATA)+1):
+        for ship_id in SHIP_DATA:
             ok = False
-            while not ok:
-                
-                heading = self.board.random_heading()
-                if method == "random":
-                    # all placements are equally likely
-                    index = self.board.random_index(unoccuppied=True)
-                    ok = self.board.is_valid_ship_placement(ship_id, index, heading)
-                    
-                elif method == "cluster":
-                    # closer to an existing ship is more likely
-                    X,Y = np.meshgrid(range(self.board.size), range(self.board.size))
-                    D = np.zeros(X.shape)
-                    for ship in list(self.board.fleet.values()):
-                        rows,cols = zip(*self.board.index_for_ship(ship))
-                        for (r,c) in zip(rows,cols): 
-                            D = D + (X - c)**2 + (Y - r)**2
-                    indices = self.board.unoccuppied_indices()
-                    prob = np.zeros(len(indices))
-                    for (i,rc) in enumerate(indices):
-                        prob[i] = 1 / (1 + D[rc[0],rc[1]])
-                    prob = np.array(prob)
-                    prob = prob / np.sum(prob)
-                    index = indices[np.random.choice(range(len(indices)), 
-                                                     size=1, 
-                                                     p = prob)[0]]
-                    ok = self.board.is_valid_ship_placement(ship_id, index, heading)
-                    
-                elif method == "isolated": 
-                    # find a placement that is not touching another ship
-                    sites = self.board.all_valid_placements(
-                        SHIP_DATA[ShipId(ship_id)]["length"],
-                        distance=1, diagonal=False)
-                    index, heading = sites[np.random.choice(range(len(sites)))]
-                    ok = True
-                    
-                elif method == "very.isolated":
-                    # find a placement that is not touching another ship, 
-                    # even on a diagonal
-                    sites = self.board.all_valid_placements(
-                        SHIP_DATA[ShipId(ship_id)]["length"],
-                        distance=1, diagonal=True)
-                    index, heading = sites[np.random.choice(range(len(sites)))]
-                    ok = True
-                    
-                else:
-                    raise ValueError(f"Invalid placement strategy: {method}.")
-                #ok = self.board.is_valid_ship_placement(i, index, heading)
+            counter = 0
+            while not ok and counter < MAX_ITER:
+                index, heading = self.random_ship_placement("method", ship_id)
+                ok = self.board.is_valid_ship_placement(ship_id, index, heading)
+                counter += 1
+            if not ok:
+                raise Exception("Max ship placement repetions has been reached.")
             self.board.place_ship(ship_id, index, heading)
         return ok
             
@@ -367,15 +444,15 @@ class Player:
         """
         for i in range(1,len(SHIP_DATA)+1):
             ok = False
-            name = SHIP_DATA[ShipId(i)]["name"]
+            name = SHIP_DATA[ShipType(i)]["name"]
             while not ok:
-                space = input("Space for {name.upper())}: ")
+                coord = Coord(input("Space for {name.upper())}: "))
                 heading = input("Heading for {name.upper())}: ")                
-                if not self.board.is_valid_ship_placement(i, space, heading):
+                if not self.board.is_valid_ship_placement(i, coord, heading):
                     ok = False
                     print("Invalid placement.")
                 else:
-                    self.board.place_ship(i, space, heading)
+                    self.board.place_ship(i, coord, heading)
                     print(name + " placed successfully (" 
                           + str(i) + " of " + str(len(SHIP_DATA)) + ").")
         print("Fleet placed successfully.")  
@@ -408,7 +485,7 @@ class Player:
         else:
             raise TypeError("other_player must be an instance of Player.")
             
-    def still_alive(self): 
+    def isalive(self): 
         """Returns true if any of this players ships are still afloat."""
         return any(self.board.afloat_ships())
 
@@ -430,8 +507,6 @@ class Player:
         """Updates strategy_data based on the last targeted space and the
         resulting outcome.
         """
-        # print(last_target)
-        # print(last_outcome)
         strat_data = self.strategy_data
         strat_data["last_target"] = last_target
         if last_outcome["sunk_ship_id"]:
@@ -455,56 +530,53 @@ class Player:
         This is where the strategy is implemented.
         """
         if self.strategy["offense"] == "random":
-            if self.return_all_possibilities:
-                return self.board.untargeted_
-            return self.board.random_coord(untargeted=True)
+            targets = self.board.all_coords(untargeted=True)
         
         elif self.strategy["offense"] == "random.hunt.dumb":
             # If in kill mode, fire around the most recent hit.
             if self.strategy_data["state"] == "hunt":
-                target = self.board.random_coord(untargeted=True)
+                targets = self.board.all_coords(untargeted=True)
                 self.strategy_data["message"] = "hunt mode."
             else:
                 last_hit = self.strategy_data["last_hit"]
-                target = self.board.random_coord_around(last_hit, 
-                                                        untargeted=True)
+                targets = self.board.coords_around(last_hit, untargeted=True)
                 self.strategy_data["message"] = "kill mode."
-            if not target:
+            if not targets:
                 self.strategy_data["state"] = "hunt"
                 self.strategy_data["message"] += f" No viable target found " \
                     f"around last hit {last_hit}; reverting to hunt mode. "
-                target = self.board.random_coord(untargeted=True)
-            return target
+                targets = self.board.all_coords(untargeted=True)
 
         elif self.strategy["offense"] == "random.hunt":
             # If in kill mode, find two hits in a row. Then fire in a line
             # until a ship is sunk.
             if self.strategy_data["state"] == "hunt":
-                target = self.board.random_coord(untargeted=True)
+                targets = self.board.coords_around(last_hit, untargeted=True)
                 self.strategy_data["message"] = "hunt mode."
             else:
                 last_hit = self.strategy_data["last_hit"]
                 hits = self.strategy_data["hits_since_last_sink"]
                 self.strategy_data["message"] = "kill mode."
                 if len(hits) == 1:
-                    target = self.board.random_coord_around(hits[-1], 
-                                                          untargeted=True)
+                    targets = self.board.coords_around(hits[-1], untargeted=True)
                     self.strategy_data["message"] += " Searching around last hit."
                 elif len(hits) > 1:
-                    target = self.board.random_colinear_target_coords(hits)
+                    targets = self.board.colinear_target_coords(hits)
                     self.strategy_data["message"] += " Searching along colinear hits."                    
                 else:
                     raise Exception("hits_since_last_sink should not be empty.")
-                if not target:
-                    self.strategy_data["state"] = "hunt"
-                    self.strategy_data["message"] += " No viable target found; " \
-                        "reverting to hunt mode. "
-                    target = self.board.random_coord(untargeted=True)
-            return target
+            if not targets:
+                self.strategy_data["state"] = "hunt"
+                self.strategy_data["message"] += " No viable target found; " \
+                    "reverting to hunt mode. "
+                targets = self.board.all_coords(untargeted=True)
             
         else:
             s = self.strategy["offense"]
             raise ValueError(f"Invalid offensive strategy: {s}")
+            
+        self.possible_targets = targets
+        return random_choice(targets)  
             
         
     def fire_at_target(self, target_coord): 
@@ -515,15 +587,13 @@ class Player:
         Returns a Space enum value (MISS or HIT).
         """
         outcome = self.opponent.board.incoming_at_coord(target_coord)
-        self.board.update_target_grid(self.board.index_for_coord(target_coord), 
+        self.board.update_target_grid(target_coord, 
                                      outcome["hit"], 
                                      outcome["sunk_ship_id"])
         self.shot_log += [target_coord]
         if target_coord in self.remaining_targets:
             self.remaining_targets.pop(self.remaining_targets.index(target_coord))
         self.outcome_log += [outcome]
-        # print(target_coord)
-        # print(outcome)
         self.update_state(target_coord, outcome)
         return outcome
     
@@ -532,14 +602,13 @@ class Player:
         fig = self.board.show_board()
         axs = fig.axes
         ax = axs[0]
-        target_circ = plt.Circle(self.board.index_for_coord(self.last_target()), 
+        target_circ = plt.Circle(self.last_target, 
                                  radius=0.3*1.4, 
                                  fill = False,
                                  edgecolor = "yellow") 
         ax.add_patch(target_circ)
         
-       
-# -----------------------------------------------------------------------------
+#%%
 class Board:
     """An instance of a Battleship game board. Each board has a fleet of 5 
     ships, a 10 x 10 ocean grid upon which ships are arranged, and a 10 x 10 
@@ -552,7 +621,7 @@ class Board:
         self.fleet = {}
         self.ocean_grid = np.zeros((size, size), dtype=np.int16)      
         self.target_grid = np.ones((size, size), 
-                                   dtype=np.int8) * Space.UNKNOWN.value
+                                   dtype=np.int8) * TargetValue.UNKNOWN
         
     def __str__(self):
         """Returns a string that uses text to represent the target map
@@ -569,9 +638,9 @@ class Board:
         for (r,row) in enumerate(self.target_grid):
             s += (self.row_label(r) 
                   + " "
-                  + " ".join(["-" if x == Space.UNKNOWN else 
-                              'O' if x == Space.MISS else
-                              'X' if x == Space.HIT else 
+                  + " ".join(["-" if x == TargetValue.UNKNOWN else 
+                              'O' if x == TargetValue.MISS else
+                              'X' if x == TargetValue.HIT else 
                               str(x) for x in row]) 
                   + "\n")
         s += ("\n  " 
@@ -585,99 +654,119 @@ class Board:
                   + "\n")
         return s
     
-    # Indexing & coordinate functions
-    def index_for_coord(self, coord):
-        """Returns a tuple containing the row/column indices that correspond
-        to the input coordinate.
-        For example, index_for_coord('B4') returns (1,3).
-        """
-        max_letter = chr(LETTER_OFFSET + self.size - 1)
-        m = re.search(f"[A-{max_letter}][1-9][0-9]?", coord)
-        if m:
-            row = ord(m.string[0].upper()) - LETTER_OFFSET
-            col = int(m.string[1:]) - 1
-        else:
-            raise ValueError(f"Input coordinate {coord} must be a string consisting"
-                             f" of a letter A-J followed by a number 1-10.")
-        if row < 0 or row >= self.size or col < 0 or col >= self.size:
-            raise ValueError(f"Input space '{coord}' did not "
-                             f"produce row and column values between 1 and "
-                             f"{self.size}.")
-        return (row, col)
+    # Coordinate functions
+    # def index_for_coord(self, coord):
+    #     """Returns a tuple containing the row/column indices that correspond
+    #     to the input coordinate.
+    #     For example, index_for_coord('B4') returns (1,3).
+    #     """
+    #     max_letter = chr(LETTER_OFFSET + self.size - 1)
+    #     m = re.search(f"[A-{max_letter}][1-9][0-9]?", coord)
+    #     if m:
+    #         row = ord(m.string[0].upper()) - LETTER_OFFSET
+    #         col = int(m.string[1:]) - 1
+    #     else:
+    #         raise ValueError(f"Input coordinate {coord} must be a string consisting"
+    #                          f" of a letter A-J followed by a number 1-10.")
+    #     if row < 0 or row >= self.size or col < 0 or col >= self.size:
+    #         raise ValueError(f"Input space '{coord}' did not "
+    #                          f"produce row and column values between 1 and "
+    #                          f"{self.size}.")
+    #     return (row, col)
         
-    def coord_for_index(self, index):
-        """Returns a list of Space strings corresponding to the input row/column
-        tuple."""
-        if isinstance(index, list):
-            return [self.coord_for_index(i) for i in index]
+    # def coord_for_index(self, index):
+    #     """Returns a list of Space strings corresponding to the input row/column
+    #     tuple."""
+    #     if isinstance(index, list):
+    #         return [self.coord_for_index(i) for i in index]
         
-        row,col = index
-        if ((row < 0) or (row >= self.size) or 
-                (col < 0) or (col >= self.size)):
-            raise ValueError(f"Rows and cols must be between 0 and " 
-                             f"{self.size}.")
-        return chr(row + LETTER_OFFSET) + str(col+1)
+    #     row,col = index
+    #     if ((row < 0) or (row >= self.size) or 
+    #             (col < 0) or (col >= self.size)):
+    #         raise ValueError(f"Rows and cols must be between 0 and " 
+    #                          f"{self.size}.")
+    #     return chr(row + LETTER_OFFSET) + str(col+1)
         
-    def row_label(self, row):
-        """Returns the label of the input row index. Rows 0-9 correspond to
-        labels A-J (or however big the board is)."""
-        if row < 0 or row >= self.size:
-            raise ValueError(f"Input row must be between 0 and {self.size}.")
-        return chr(LETTER_OFFSET + row)
+    # def row_label(self, row):
+    #     """Returns the label of the input row index. Rows 0-9 correspond to
+    #     labels A-J (or however big the board is)."""
+    #     if row < 0 or row >= self.size:
+    #         raise ValueError(f"Input row must be between 0 and {self.size}.")
+    #     return chr(LETTER_OFFSET + row)
     
-    def all_indices(self, untargeted=False, unoccuppied=False):
-        """Returns a list of all row/column index pairs on the board. If 
-        untargeted is True, only indices that have not been targeted are 
-        returned. If unoccuppied is True, only indices with no ships on the
-        board's ocean grid are returned."""
-        all_indices = [(r,c) for r in range(self.size) 
-                       for c in range(self.size)]
-        if untargeted and unoccuppied:
-            raise ValueError("untargeted and unoccuppied cannot both be True.")
-        if untargeted:
-            exclude = list(zip(
-                np.where(self.target_grid != Space.UNKNOWN.value)))
-        elif unoccuppied:
-            exclude = list(zip(np.where(self.ocean_grid != 0)))
-        else:
-            return all_indices
-        return [i for i in all_indices if i not in exclude]
+    # def all_indices(self, untargeted=False, unoccuppied=False):
+    #     """Returns a list of all row/column index pairs on the board. If 
+    #     untargeted is True, only indices that have not been targeted are 
+    #     returned. If unoccuppied is True, only indices with no ships on the
+    #     board's ocean grid are returned."""
+    #     all_indices = [(r,c) for r in range(self.size) 
+    #                    for c in range(self.size)]
+    #     if untargeted and unoccuppied:
+    #         raise ValueError("untargeted and unoccuppied cannot both be True.")
+    #     if untargeted:
+    #         exclude = list(zip(
+    #             np.where(self.target_grid != TargetValue.UNKNOWN)))
+    #     elif unoccuppied:
+    #         exclude = list(zip(np.where(self.ocean_grid != 0)))
+    #     else:
+    #         return all_indices
+    #     return [i for i in all_indices if i not in exclude]
         
-    def all_coords(self, untargeted=False, unoccuppied=False):
+    def all_coords(self, untargeted=False, unoccuppied=False,
+                   targeted=False, occuppied=False):
         """Returns a list of all coordinates on the board.
         If untargeted is True, only coords that have not been targeted are 
         returned. If unoccuppied is True, only coords with no ships on the
         board's ocean grid are returned."""
-        if not untargeted and not unoccuppied:
-            rows = [chr(LETTER_OFFSET + x) for x in range(self.size)]
-            cols = [str(x+1) for x in range(self.size)]
-            return [r + c for r in rows for c in cols]
-        else:
-            return [self.coord_for_index(i) for i in 
-                    self.all_indices(untargeted, unoccuppied)]
-    
-    def unoccuppied_indices(self):
-        """Returns the indicides of all coordinates that are not occuppied by
-        a ship."""
-        occ = self.coord_for_index(self.occuppied_indices())
-        unocc = [c for c in self.all_coords() if c not in occ]
-        return [self.index_for_coord(c) for c in unocc]
+        if np.sum((untargeted, unoccuppied, targeted, occuppied)) > 1:
+            raise ValueError("Only one of the (un)occuppied or (un)targeted" \
+                             " inputs can be set to True.")
+        indices = None
+        exclude = []
+        if untargeted:
+            xr,xc = np.where(self.target_grid != TargetValue.UNKNOWN)
+            exclude = list(zip(xr, xc))
+        elif unoccuppied:
+            xr,xc = np.where(self.ocean_grid != 0)
+            exclude = list(zip(xr, xc))
+        elif targeted:
+            r,c = np.where(self.target_grid != TargetValue.UNKNOWN)
+            indices = list(zip(r,c))
+        elif occuppied:
+            r,c = np.where(self.ocean_grid != 0)
+            indices = list(zip(r,c))
 
-    def occuppied_indices(self):
+        if indices == None:
+            indices = [(r,c) for r in range(self.size) 
+                       for c in range(self.size) 
+                       if (r,c) not in exclude]
+        return indices
+        #return [Coord(rc) for rc in indices]
+    
+    def unoccuppied_coords(self):
+        """Returns the row/column for all coordinates that are not occuppied by
+        a ship."""
+        return self.all_coords(unoccuppied=True)
+
+    def occuppied_coords(self):
         """Returns the indices of all ship-occuppied coordinates on the board 
         (regardless of damage/sunk status).
         """
-        r,c = np.where(self.ocean_grid)
-        return list(zip(r,c))
+        return self.all_coords(occuppied=True)
     
-    def targeted_indices(self):
+    def targeted_coords(self):
         """Returns the indices of all previously targeted indices on the target
         grid (i.e., the location of all pegs, white or red).
         """
-        r,c = np.where(self.target_grid != Space.UNKNOWN.value)
-        return list(zip(r,c))
+        return self.all_coords(targeted=True)
     
-    def relative_indices_for_heading(self, heading, length=1):
+    def untargeted_coords(self):
+        """Returns the indices of all non targeted indices on the target
+        grid (i.e., the locations with no pegs).
+        """
+        return self.all_coords(untargeted=True)
+    
+    def relative_coords_for_heading(self, heading, length=1):
         """Returns row and column arrays with displacements corresponding to
         a ship facing the input heading and with input length. The first slot 
         on the ship will be at relative position (0,0), the second at (-1,0) 
@@ -709,24 +798,84 @@ class Board:
             ds = np.vstack(([0,0], 
                             np.cumsum(np.tile(ds, (length-1,1)), axis=0)))
             return (ds[:,0], ds[:,1])
-    
-    def indices_around(self, index, diagonal=False):
-        """Returns a list of all indices surrounding the input index. That is, 
-        the row/column pairs for the spaces directly north, south, east, and
-        west of the input index. 
-        If the diagonal input is True, the spaces northwest, northeast, south-
-        west, and southeast are also returned.
+       
+    def coords_around(self, coord, diagonal=False, 
+                     untargeted=False, unoccuppied=False):
+        """Returns all coordinates that surrounds the input coordinate.
+        By default, the random coordinate will be touching the input coordinate
+        (so input C5 could result in one of B5, C4, C6, or D5). If
+        diagonal is True, the 4 spaces that touch the input coordinate diagaonally
+        (the ones NW, NE, SW, SE of the target) are also possible.
+        If untargeted is True, then only untargeted coordinates will be chosen.
         """
-        if diagonal:
-            rows = np.array([-1, -1, 0, 1, 1, 1, 0, -1])
-            cols = np.array([0, -1, -1, -1, 0, 1, 1, 1])
+        if unoccuppied:
+            exclude = self.occuppied_indices()
+        if untargeted:
+            exclude = self.targeted_indices()
         else:
-            rows = np.array([-1, 0, 1, 0])
-            cols = np.array([0, -1, 0, 1])
-        r = rows + index[0]
-        c = cols + index[1]
-        ivalid = (r >= 0) * (c >= 0) * (r < self.size) * (c < self.size)
-        return list(zip(r[ivalid], c[ivalid]))
+            exclude = []
+        
+        if diagonal:
+            rows = coord[0] + np.array([0, -1, -1, -1, 0, 1, 1, 1])
+            cols = coord[1] + np.array([1, 1, 0, -1, -1, -1, 0, 1])
+        else:
+            rows = coord[0] + np.array([0, -1, 0, 1])
+            cols = coord[1] + np.array([1, 0, -1, 0])
+        ivalid = ((rows >= 0) * (rows < self.size) * 
+                  (cols >= 0) * (cols < self.size))
+        rows = rows[ivalid]
+        cols = cols[ivalid]
+        return [(rows[i], cols[i]) for i in range(len(rows)) if 
+                   (rows[i], cols[i]) not in exclude]
+    
+    def colinear_target_coords(self, coords, 
+                               untargeted=False, unoccuppied=False):
+        """Returns the two coordinates at the end of the line made
+        by the input coordinates.
+        """
+        if unoccuppied:
+            exclude = self.occuppied_indices()
+        if untargeted:
+            exclude = self.targeted_indices()
+        else:
+            exclude = []
+            
+        ds = (np.diff(np.array(coords), axis=0))
+        ia,ib = coords[0],coords[-1]
+        choices = []
+        
+        # If vertical, find the next miss or unknown N/S of the line
+        if np.any(ds[:,0] != 0):
+            
+            while (ia[0] >= 0 and ia[0] < self.size and 
+                   self.target_grid[ia] != TargetValue.UNKNOWN):
+                ia = (ia[0] - 1, ia[1])
+            while (ib[0] >= 0 and ib[0] < self.size and 
+                   self.target_grid[ib] != TargetValue.UNKNOWN):
+                ib = (ib[0] + 1, ib[1])
+            if ia[0] >= 0:
+                choices += [ia]
+            if ib[0] < self.size:
+                choices += [ib]
+                
+        # If horizontal, find the next miss or unknown E/W of the line
+        elif np.any(ds[:,1] != 0):
+            while (ia[1] >= 0 and ia[1] < self.size and 
+                   self.target_grid[ia] != TargetValue.UNKNOWN):
+                ia = (ia[0], ia[1] - 1)
+            while (ib[1] >= 0 and ib[1] < self.size and 
+                   self.target_grid[ib] != TargetValue.UNKNOWN):
+                ib = (ib[0], ib[1] + 1)
+            if ia[1] >= 0:
+                choices += [ia]
+            if ib[1] < self.size:
+                choices += [ib]
+        
+        return [c for c in choices if c not in exclude]
+        # if not choices:
+        #     return None
+        # return self.coord_for_index(
+        #     choices[np.random.choice(range(len(choices)))])
     
     def all_valid_placements(self, length, distance=0, diagonal=False):
         """Returns a list of all possible placements (consisting of row, 
@@ -761,25 +910,20 @@ class Board:
     def afloat_ships(self):
         """Returns a list of the Ship instances that are still afloat."""
         return np.array([ship.afloat() for ship in list(self.fleet.values())])
-    
-    def index_for_ship(self, ship):
-        """Returns the indices of the ocean grid that contain the input ship.
-        """
-        r,c = np.where(self.ocean_grid == ship.ship_id.value)
-        return list(zip(r,c))
-        
+            
     def coord_for_ship(self, ship):
-        """Returns the coordinates occuppied by the input Ship instance."""
-        return [self.coord_for_index(i) for i in self.index_for_ship(ship)]
+        """Returns the row/col coordinates occuppied by the input Ship instance."""
+        r,c = np.where(self.ocean_grid == ship.ship_id)
+        return list(zip(r,c))
     
-    def ship_at_index(self, index):
+    def ship_at_coord(self, index):
         """Returns the Ship object placed at the input coordinate.
         If no ship is present at the input space, returns None.
         """
         ship_id = self.ocean_grid[index]
         if ship_id == 0:
             return None
-        return self.fleet[ShipId(ship_id)]
+        return self.fleet[ShipType(ship_id)]
     
     # Ship placement functions
     def reset(self):
@@ -789,7 +933,7 @@ class Board:
         self.target_grid = board.target_grid
         self.ocean_grid = board.ocean_grid
         
-    def place_ship(self, ship_desc, index, heading):
+    def place_ship(self, ship_desc, coord, heading):
         """Places a ship corresponding to the input ship_desc (which may be an
         integer 1-5 or a string like "Patrol", "Carrier", etc.)
         on the grid at the input indices and the input heading 
@@ -805,16 +949,16 @@ class Board:
             ship_id = ship_desc
             
         ship = Ship(ship_id)
-        if not self.is_valid_ship_placement(ship_id, index, heading):
-            print(f"Cannot place {ship.name} at {index}.")
+        if not self.is_valid_ship_placement(ship_id, coord, heading):
+            print(f"Cannot place {ship.name} at {coord}.")
             return False
         else:
-            self.fleet[ShipId(ship_id)] = ship
-            drows,dcols = self.relative_indices_for_heading(heading, ship.length)
-            self.ocean_grid[index[0] + drows, index[1] + dcols] = ship_id
+            self.fleet[ShipType(ship_id)] = ship
+            drows,dcols = self.relative_coords_for_heading(heading, ship.length)
+            self.ocean_grid[coord[0] + drows, coord[1] + dcols] = ship_id
             return True
         
-    def is_valid_ship_placement(self, ship_id, index, heading):
+    def is_valid_ship_placement(self, ship_id, coord, heading):
         """Returns True if the input ship can be placed at the input spot with
         the input heading, and False otherwise.
         The ship/space/heading is valid if the ship:
@@ -822,16 +966,15 @@ class Board:
             2. Does not hang off the edge of the grid
             3. Does not overlap with an existing ship on the grid
         """
-        length = SHIP_DATA[ShipId(ship_id)]["length"]
-        if ShipId(ship_id) in self.fleet.keys():
+        length = SHIP_DATA[ShipType(ship_id)]["length"]
+        if ShipType(ship_id) in self.fleet.keys():
             return False
-        drows,dcols = self.relative_indices_for_heading(heading, length)
-        rows,cols = index[0] + drows, index[1] + dcols
+        drows,dcols = self.relative_coords_for_heading(heading, length)
+        rows,cols = coord[0] + drows, coord[1] + dcols
         if (np.any(rows < 0) or np.any(rows >= self.size) or 
             np.any(cols < 0) or np.any(cols >= self.size)):
                 return False
-        r,c = np.where(self.ocean_grid)
-        occuppied = list(zip(r,c))
+        occuppied = self.all_coords(occuppied=True)
         for i in range(len(rows)):
             if (rows[i],cols[i]) in occuppied:
                 return False
@@ -843,7 +986,7 @@ class Board:
             indicates that either setup is not complete, or the game has already
             started).
             """
-            if not np.all(self.target_grid == Space.UNKNOWN.value):
+            if not np.all(self.target_grid == TargetValue.UNKNOWN):
                 return False
             for ship in self.fleet.values():
                 if np.any(ship.damage > 0):
@@ -855,19 +998,7 @@ class Board:
         
     # Random coordinate functions
     def random_coord(self, unoccuppied=False, untargeted=False):
-        """Returns a random coordinate string from the board.
-        
-        If the unoccuppied input is True, the coordinate will be one that does 
-        not contain a ship on this board's ocean grid (note that if this is 
-        used publically, this could reveal ship locations).
-                               
-        If the untargeted input is True, the coordinate will be one that has
-        not been shot at from this board (i.e., no peg on the target grid).
-        """
-        return self.coord_for_index(self.random_index(unoccuppied, untargeted))
-        
-    def random_index(self, unoccuppied=False, untargeted=False):
-        """Returns a random index tuple from the board.
+        """Returns a random row/col coordinate from the board.
         
         If the unoccuppied input is True, the index will be one that does 
         not contain a ship on this board's ocean grid (note that if this is 
@@ -894,99 +1025,26 @@ class Board:
         """Returns a random heading: N/S/E/W."""
         return(np.random.choice(['N','S','E','W']))
     
-    def random_coord_around(self, coord, untargeted=False, diagonal=False,):
-        """Returns a random coordinate that surrounds the input coordinate.
-        By default, the random coordinate will be touching the input coordinate
-        (so input C5 could result in one of B5, C4, C6, or D5). If
-        diagonal is True, the 4 spaces that touch the input coordinate diagaonally
-        (the ones NW, NE, SW, SE of the target) are also possible.
-        If untargeted is True, then only untargeted coordinates will be chosen.
-        """
-        # unoccuppied = False
-        # if unoccuppied:
-        #     exclude = self.occuppied_indices()
-        if untargeted:
-            exclude = self.targeted_indices()
-        else:
-            exclude = []
-        
-        r,c = self.index_for_coord(coord)
-        if diagonal:
-            rows = r + np.array([0, -1, -1, -1, 0, 1, 1, 1])
-            cols = c + np.array([1, 1, 0, -1, -1, -1, 0, 1])
-        else:
-            rows = r + np.array([0, -1, 0, 1])
-            cols = c + np.array([1, 0, -1, 0])
-        ivalid = ((rows >= 0) * (rows < self.size) * 
-                  (cols >= 0) * (cols < self.size))
-        rows = rows[ivalid]
-        cols = cols[ivalid]
-        indices = [(rows[i], cols[i]) for i in range(len(rows)) if 
-                   (rows[i], cols[i]) not in exclude]
-        if not indices:
-            return []
-        return self.coord_for_index(
-            indices[np.random.choice(range(len(indices)))])
-    
-    def random_colinear_target_coords(self, coords):
-        """Returns one of the two coordinates at the end of the line made
-        by the input coordinates.
-        """
-        indices = [self.index_for_coord(c) for c in sorted(coords)]
-        ds = (np.diff(np.array(indices), axis=0))
-        ia,ib = indices[0],indices[-1]
-        choices = []
-        
-        # If vertical, find the next miss or unknown N/S of the line
-        if np.any(ds[:,0] != 0):
-            
-            while (ia[0] >= 0 and ia[0] < self.size and 
-                   self.target_grid[ia] != Space.UNKNOWN.value):
-                ia = (ia[0] - 1, ia[1])
-            while (ib[0] >= 0 and ib[0] < self.size and 
-                   self.target_grid[ib] != Space.UNKNOWN.value):
-                ib = (ib[0] + 1, ib[1])
-            if ia[0] >= 0:
-                choices += [ia]
-            if ib[0] < self.size:
-                choices += [ib]
-                
-        # If horizontal, find the next miss or unknown E/W of the line
-        elif np.any(ds[:,1] != 0):
-            while (ia[1] >= 0 and ia[1] < self.size and 
-                   self.target_grid[ia] != Space.UNKNOWN.value):
-                ia = (ia[0], ia[1] - 1)
-            while (ib[1] >= 0 and ib[1] < self.size and 
-                   self.target_grid[ib] != Space.UNKNOWN.value):
-                ib = (ib[0], ib[1] + 1)
-            if ia[1] >= 0:
-                choices += [ia]
-            if ib[1] < self.size:
-                choices += [ib]
-                
-        if not choices:
-            return None
-        return self.coord_for_index(
-            choices[np.random.choice(range(len(choices)))])
-    
     # Combat functions
-    def update_target_grid(self, target_index, hit, ship_id):
+    def update_target_grid(self, target_coord, hit, ship_id):
         """Updates the target map at the input space with the hit informaton
         (hit and ship_id, if a ship was sunk) provided as inputs.
         Prints a message to the console if the target space has already been
         targeted.
         """
-        #print(target_index, hit, ship_id)
-        prev_val = self.target_grid[target_index]
+        if isinstance(target_coord, Coord):
+            target_coord = target_coord.rowcol
+            
+        prev_val = self.target_grid[target_coord]
         if hit:
             if ship_id:
-                self.target_grid[target_index] = ship_id.value
+                self.target_grid[target_coord] = ship_id
             else:
-                self.target_grid[target_index] = Space.HIT.value   
+                self.target_grid[target_coord] = TargetValue.HIT   
         else:
-            self.target_grid[target_index] = Space.MISS.value
-        if prev_val != Space.UNKNOWN.value:
-            print(f"Repeat target: {self.coord_for_index(target_index)}")
+            self.target_grid[target_coord] = TargetValue.MISS
+        if prev_val != TargetValue.UNKNOWN:
+            print(f"Repeat target: {Coord(target_coord).lbl}")
             
     def incoming_at_coord(self, coord):
         """Determines the outcome of an opponent's shot landing at the input
@@ -1004,8 +1062,9 @@ class Board:
             message: list containing the following, with optional parts in ():
                 ['hit'/'miss', ('[shipname] sunk'), ('repeat target')]
         """
-        target_index = self.index_for_coord(coord)
-        ship = self.ship_at_index(target_index)
+        if isinstance(coord, Coord):
+            coord = coord.rowcol
+        ship = self.ship_at_coord(coord)
         if not ship:
             outcome = {"hit": False, "sunk": False, "sunk_ship_id": None,
                        "message": []}
@@ -1014,7 +1073,7 @@ class Board:
                        "message": []}
             ship_indices = self.index_for_ship(ship)
             dmg_slot = [i for i in range(len(ship_indices)) 
-                      if ship_indices[i] == target_index]
+                      if ship_indices[i] == coord]
             if len(dmg_slot) != 1:
                 raise Exception(f"Could not determine damage location for \
                                 target {coord}")
@@ -1039,7 +1098,7 @@ class Board:
         if targets:
             self.update_target_grid((0,4), True, None)
             self.update_target_grid((0,3), True, None)
-            self.update_target_grid((0,5), True, ShipId(3))
+            self.update_target_grid((0,5), True, ShipType(3))
             self.update_target_grid((2,8), False, None)
             self.update_target_grid((9,7), False, None)
             self.update_target_grid((6,7), False, None)
@@ -1047,11 +1106,11 @@ class Board:
             self.update_target_grid((3,2), False, None)
             self.update_target_grid((1,6), False, None)
             
-            self.fleet[ShipId(2)].hit(0)
-            self.fleet[ShipId(2)].hit(1)
-            self.fleet[ShipId(2)].hit(2)
-            self.fleet[ShipId(4)].hit(3)
-            self.fleet[ShipId(5)].hit(2)
+            self.fleet[ShipType(2)].hit(0)
+            self.fleet[ShipType(2)].hit(1)
+            self.fleet[ShipType(2)].hit(2)
+            self.fleet[ShipType(4)].hit(3)
+            self.fleet[ShipType(5)].hit(2)
         
     # Visualization functions
     def ocean_grid_image(self):
@@ -1060,7 +1119,7 @@ class Board:
         """
         im = np.zeros((self.size, self.size))
         for ship_id in self.fleet:
-            ship = self.fleet[ShipId(ship_id)]
+            ship = self.fleet[ship_id]
             dmg = ship.damage
             rows,cols = zip(*self.index_for_ship(ship))
             im[rows,cols] = dmg + 1
@@ -1153,14 +1212,14 @@ class Board:
             axs[1].add_patch(peg)
             
         # vertical grid
-        rows,cols = np.where(vert_grid == Space.MISS.value)
+        rows,cols = np.where(vert_grid == TargetValue.MISS)
         white_pegs = [plt.Circle((x,y), radius=peg_radius, 
                                  color = miss_color, 
                                  edgecolor = peg_outline_color) 
                     for (x,y) in zip(cols+1,rows+1)]
         for peg in white_pegs:
             axs[0].add_patch(peg) 
-        rows,cols = np.where(vert_grid >= Space.HIT.value)
+        rows,cols = np.where(vert_grid >= TargetValue.HIT)
         red_pegs = [plt.Circle((x,y), radius=peg_radius, 
                                color = hit_color, 
                                edgecolor = peg_outline_color) 
@@ -1198,26 +1257,16 @@ class Ship:
         Enum ShipId, or one of the following (case insensitive) strings:
             Patrol, Destroyer, Submarine, Battleship, Carrier
         """
-            
-        if isinstance(ship_type, ShipId):
-            self._ship_id = ship_type
-        elif isinstance(ship_type, int):
-            try:
-                self._ship_id = ShipId(ship_type)
-            except:
-                raise ValueError(f"For integer input, ship_type must be between" \
-                                 f" 1 and {len(SHIP_DATA.keys())}.")
-        elif isinstance(ship_type, str):
-            self._ship_id = [k for k in SHIP_DATA if 
-                            SHIP_DATA[k]["name"].lower() == ship_type.lower()]
-            if not self.ship_id:
+        if isinstance(ship_type, str):
+            id_match = [k for k in SHIP_DATA if 
+                        SHIP_DATA[k]["name"].lower() == ship_type.lower()]
+            if id_match:
+                self._ship_id = id_match[0]
+            else:
                 ValueError("For string input, ship_type must be one of: " 
                            + ", ".join([SHIP_DATA[k]["name"] for k in SHIP_DATA])) 
-            else:
-                self._ship_id = self.ship_id[0]
         else:
-            raise TypeError("Input ship_type must be a string, integer 1-5, "
-                            "or ShipId Enum; not " + type(ship_type))
+            self._ship_id = ship_type
             
         self.name = SHIP_DATA[self._ship_id]["name"]
         self.length = SHIP_DATA[self._ship_id]["length"]
@@ -1250,19 +1299,18 @@ class Ship:
         (i.e., if it is non-integer, less than 0, or greater than the ship
          length minus 1).
         """
-        if not isinstance(slot, int):
-            raise TypeError("slot must be an integer between 0 and the ship" 
-                            "length (exclusive).")
         if slot < 0 or slot >= self.length:
             raise ValueError("Hit at slot #" + str(slot) + " is not valid; "
                              "must be 0 to " + str(self.length-1))
         if self.damage[slot] > 0:
-            Warning("Splot " + str(slot) + " is already damaged.")
+            Warning("Slot " + str(slot) + " is already damaged.")
         self.damage[slot] += 1
         return(self.damage[slot])
     
     def afloat(self):
+        """Returns True if the ship has not taken damage at each slot."""
         return(any(dmg < 1 for dmg in self.damage))
 
     def sunk(self):
+        """Returns True if the ship has taken damage at each slot."""
         return(all(dmg > 0 for dmg in self.damage))
