@@ -6,18 +6,29 @@ Created on Mon Aug 15 12:11:29 2022
 @author: jason
 """
 
+#%%
+# Stuff to do:
+    # * Implement a Strategy class that can be given to a Player. The class
+    #   should implement methods 'target' and 'placement' to give a 
+    #   target when Player calls .pick_target, and .place_fleet (or whatever) 
+    #   for a given board and shot/outcome history.
+    #
+    # * Separate Player class into AIPlayer and HumanPlayer subclasses.
+    
+#%%
 import numpy as np
 import matplotlib as mpl
 from matplotlib import pyplot as plt
-import re
-from enum import Enum, IntEnum
+from enum import IntEnum
+import abc
 
 #%%
 # Constants
-LETTER_OFFSET = 65
-DEFAULT_BOARD_SIZE = 10
+# LETTER_OFFSET = 65
+# DEFAULT_BOARD_SIZE = 10
 MAX_ITER = 1000
-
+    
+# Enums
 class ShipType(IntEnum):
     PATROL = 1
     DESTROYER = 2
@@ -25,7 +36,6 @@ class ShipType(IntEnum):
     BATTLESHIP = 4
     CARRIER = 5
     
-# Enums
 class TargetValue(IntEnum):
     """An Enum used to track hits/misses on a board's target grid.
     Can be compared for equality to integers."""
@@ -33,13 +43,69 @@ class TargetValue(IntEnum):
     MISS = -1
     HIT = 0
     
-### Data
+# Data
 SHIP_DATA = {ShipType.PATROL: {"name": "Patrol".title(), "length": 2},
              ShipType.DESTROYER: {"name": "Destroyer".title(), "length": 3},
              ShipType.SUBMARINE: {"name": "Submarine".title(), "length": 3},
              ShipType.BATTLESHIP: {"name": "Battleship".title(), "length": 4},
              ShipType.CARRIER: {"name": "Carrier".title(), "length": 5}
              }
+
+#%%
+# Text color escapes
+class fg:
+    Esc = "\033"
+    White = Esc + "[1;37m"
+    Yellow = Esc + "[1;33m"
+    Green = Esc + "[1;32m"
+    Blue = Esc + "[1;34m"
+    Cyan = Esc + "[1;36m"
+    Red = Esc + "[1;31m"
+    Magenta = Esc + "[1;35m"
+    Black = Esc + "[1;30m"
+    DarkWhite = Esc + "[0;37m"
+    DarkYellow = Esc + "[0;33m"
+    DarkGreen = Esc + "[0;32m"
+    DarkBlue = Esc + "[0;34m"
+    DarkCyan = Esc + "[0;36m"
+    DarkRed = Esc + "[0;31m"
+    DarkMagenta = Esc + "[0;35m"
+    DarkBlack = Esc + "[0;30m"
+    Off = Esc + "[0;0m"
+    
+    @staticmethod
+    def rgb(rgb):
+        """Returns a text sequence that can be used to set foreground text
+        color to the input RGB color (0-255).
+        """
+        return f"\033[38;2;{rgb[0]};{rgb[1]};{rgb[2]}m"
+    
+class bg:
+    Esc = "\033"
+    White = Esc + "[1;47m"
+    Yellow = Esc + "[1;43m"
+    Green = Esc + "[1;42m"
+    Blue = Esc + "[1;44m"
+    Cyan = Esc + "[1;46m"
+    Red = Esc + "[1;41m"
+    Magenta = Esc + "[1;45m"
+    Black = Esc + "[1;40m"
+    DarkWhite = Esc + "[0;47m"
+    DarkYellow = Esc + "[0;43m"
+    DarkGreen = Esc + "[0;42m"
+    DarkBlue = Esc + "[0;44m"
+    DarkCyan = Esc + "[0;46m"
+    DarkRed = Esc + "[0;41m"
+    DarkMagenta = Esc + "[0;45m"
+    DarkBlack = Esc + "[0;40m"
+    Off = Esc + "[0;0m"
+    
+    @staticmethod
+    def rgb(rgb):
+        """Returns a text sequence that can be used to set background text
+        color to the input RGB color (0-255).
+        """
+        return f"\033[48;2;{rgb[0]};{rgb[1]};{rgb[2]}m"    
 
 #%% Functions
 
@@ -48,7 +114,6 @@ def random_choice(x, p=None):
     or array."""
     return x[np.random.choice(range(len(x)), p=p)]
 
-# -----------------------------------------------------------------------------
 def battleship_sim(ngames):
     p1 = Player("ai", ("random", "random.hunt"), name="Hunt-1")
     p2 = Player("ai", ("random", "random"), name="Rando-2")
@@ -68,6 +133,15 @@ def battleship_sim(ngames):
         p2.reset()
     return np.array(winner), np.array(nturns)
 
+def play_test(strat1, strat2):
+    p1 = Player("ai", strat1, name="#1 - " + "/".join(strat1))
+    p2 = Player("ai", strat2, name="#2 - " + "/".join(strat2))
+    g = Game(p1,p2,verbose=True)
+    g.setup()
+    g.play()
+    return p1.board, p2.board
+
+
 #%% Coord Class
 
 class Coord:
@@ -81,6 +155,9 @@ class Coord:
     Instances of this class can be compared for equality to one another 
     (i.e., Coord([9,4]) == Coord("J5") is True).
     """
+    
+    __LETTER_OFFSET = 65
+    
     def __init__(self, a, b=None):
         if b is not None:
             r = a
@@ -103,12 +180,13 @@ class Coord:
         self._rowcol = r,c
         self._value = None
         
-    def _str_to_rc(self, s):
+    @classmethod    
+    def _str_to_rc(cls, s):
         """Returns a string with a letter and number (1 or 2 digits) that
         correspond to the Coord's row and column values.
         """        
-        r = ord(s[0].upper()) - LETTER_OFFSET
-        c = int(s[1:]) - 1
+        r = ord(s[0].upper()) - cls.__LETTER_OFFSET
+        c = int(s[1:]) - 1 
         return r,c
     
     @property
@@ -122,7 +200,8 @@ class Coord:
         """Returns a string description of the Coord's location, such as 
         A1, C5, J3, etc.
         """
-        return f"{chr(self._rowcol[0] + LETTER_OFFSET)}{self._rowcol[1]+1}"
+        return f"{chr(self._rowcol[0] + self.__LETTER_OFFSET)}" \
+            f"{self._rowcol[1]+1}"
     
     @property
     def value(self):
@@ -247,7 +326,7 @@ class Game:
             
         # Play until one player has lost all ships
         game_on = True
-        self.turnCount = 0
+        self.turn_count = 0
         while game_on:
             first_player.take_turn()
             if self.verbose:
@@ -256,10 +335,10 @@ class Game:
             if self.verbose: 
                 self.report_turn_outcome(second_player)
             self.turn_count += 1
-            game_on = first_player.still_alive() and second_player.still_alive()
+            game_on = first_player.isalive() and second_player.isalive()
             
         # See who won
-        if first_player.still_alive():
+        if first_player.isalive():
             self.winner, self.loser = first_player, second_player
         else:
             self.winner, self.loser = second_player, first_player
@@ -309,6 +388,12 @@ class Player:
     can be played. The player can be human or AI. In the case of human,
     this class provides an interface for selecting targets. In the case of
     an AI, the class has a 'strategy' that automatically selects targets.
+    
+    Valid placement strategies are:
+        random, cluster, isolated, very.isolated
+        
+    Valid offense strategies are:
+        random, random.hunt.dumb, random.hunt
     """
     
     def __init__(self, player_type, strategy, name=None):
@@ -380,25 +465,24 @@ class Player:
         method and ship type.
         """ 
         if method == "random":
-            index = self.board.random_index(unoccuppied=True)
+            coord = self.board.random_coord(unoccuppied=True)
             heading = self.board.random_heading()
             
         elif method in ["cluster", "clustered"]:
             X,Y = np.meshgrid(range(self.board.size), range(self.board.size))
             D = np.zeros(X.shape)
             for ship in list(self.board.fleet.values()):
-                rows,cols = zip(*self.board.index_for_ship(ship))
+                coords = self.board.coord_for_ship(ship)
+                rows,cols = zip(*coords)
                 for (r,c) in zip(rows,cols): 
                     D = D + (X - c)**2 + (Y - r)**2
-            indices = self.board.unoccuppied_indices()
-            prob = np.zeros(len(indices))
-            for (i,rc) in enumerate(indices):
+            coords = self.board.all_coords(unoccuppied=True)
+            prob = np.zeros(len(coords))
+            for (i,rc) in enumerate(coords):
                 prob[i] = 1 / (1 + D[rc[0],rc[1]])
             prob = np.array(prob)
             prob = prob / np.sum(prob)
-            index = indices[np.random.choice(range(len(indices)), 
-                                             size=1, 
-                                             p = prob)[0]]
+            coord = random_choice(coords, p=prob)
             heading = self.board.random_heading()
             
         elif (method == "isolated" or method in 
@@ -408,9 +492,9 @@ class Player:
             sites = self.board.all_valid_placements(
                 SHIP_DATA[ShipType(ship_id)]["length"],
                 distance=1, diagonal=(method != "isolated"))
-            index, heading = sites[np.random.choice(range(len(sites)))]
+            coord, heading = random_choice(sites)
         
-        return index, heading
+        return coord, heading
     
     def place_fleet_randomly(self, method):
         """Places all 5 ships randomly on the board, with randomization method
@@ -422,12 +506,12 @@ class Player:
             ok = False
             counter = 0
             while not ok and counter < MAX_ITER:
-                index, heading = self.random_ship_placement("method", ship_id)
-                ok = self.board.is_valid_ship_placement(ship_id, index, heading)
+                coord, heading = self.random_ship_placement(method, ship_id)
+                ok = self.board.is_valid_ship_placement(ship_id, coord, heading)
                 counter += 1
             if not ok:
                 raise Exception("Max ship placement repetions has been reached.")
-            self.board.place_ship(ship_id, index, heading)
+            self.board.place_ship(ship_id, coord, heading)
         return ok
             
     def set_up_fleet(self): 
@@ -551,10 +635,10 @@ class Player:
             # If in kill mode, find two hits in a row. Then fire in a line
             # until a ship is sunk.
             if self.strategy_data["state"] == "hunt":
-                targets = self.board.coords_around(last_hit, untargeted=True)
+                targets = self.board.all_coords(untargeted=True)
                 self.strategy_data["message"] = "hunt mode."
             else:
-                last_hit = self.strategy_data["last_hit"]
+                #last_hit = self.strategy_data["last_hit"]
                 hits = self.strategy_data["hits_since_last_sink"]
                 self.strategy_data["message"] = "kill mode."
                 if len(hits) == 1:
@@ -599,14 +683,127 @@ class Player:
     
     def show_attack(self):
         """Shows the board for the player, along with possible targets."""
-        fig = self.board.show_board()
+        fig = self.board.show()
         axs = fig.axes
         ax = axs[0]
-        target_circ = plt.Circle(self.last_target, 
-                                 radius=0.3*1.4, 
+        rowcol = self.last_target()
+        target_circ = plt.Circle((rowcol[1]+1, rowcol[0]+1),
+                                 radius = 0.3*1.4, 
                                  fill = False,
                                  edgecolor = "yellow") 
+        possibilities = [plt.Circle((rowcol[1]+1, rowcol[0]+1), 
+                                    radius = 0.3,
+                                    fill = False,
+                                    edgecolor = "cyan",
+                                    linestyle = ":") 
+                         for rowcol in self.possible_targets]
         ax.add_patch(target_circ)
+        for p in possibilities:
+            ax.add_patch(p)
+     
+#%%
+class Strategy(metaclass=abc.ABCMeta):
+    """A set of instructions that determines how an AI player places ships on
+    a board and chooses targets. 
+    An Strategy instance knows about the state of the board as well as the
+    history of shot coordinates, history of shot outcomes, and the turn number.
+    
+    An instance of Strategy should implement two methods:
+        .pick_target(board, outcome_history)
+        .placement_for_ship(board, ship)
+    """
+      
+    @abc.abstractmethod
+    def pick_target(self, board, history):
+        """Returns a target coordinate based on the input board and outcome 
+        history. This is where the smarts are implemented.
+        """
+        pass
+     
+    @abc.abstractmethod
+    def placement_for_ship(self, board, ship):
+        """Returns a tuple with a coordinate and heading where the input 
+        ship should be placed. The placement should be valid for the input
+        board (not intersecting other ships and not over the board edge).
+        """
+        pass
+    
+class IsolatedRandomHunter(Strategy):
+    """Placement strategy is Isolated, Offensive strategy is Random Hunter.
+    """
+        
+    def __init__(self):
+        self._data = {"state": "hunt",
+                      "last_hit": None,
+                      "last_miss": None,
+                      "last_target": None,
+                      "current_target_id": None,
+                      "last_sink_id": None,
+                      "hits_since_last_sink": [],
+                      "message": None}
+        
+    def pick_target(self, board, history):
+        """Hunt randomly until a ship is hit. Then search around the hit to 
+        find two adjacent hits. Then fire along that line until a ship is sunk 
+        or no other options remain (which may mean that the adjacent hits
+        were on two different ships).
+        """
+        # own_damage = [np.sum(ship.damage) for ship in list(board.fleet.values())]
+        # own_sunk = ~board.afloat_ships()
+        # nturns = len(history)
+        
+        if self._data["state"] == "hunt":
+            targets = board.all_coords(untargeted=True)
+            self._data["message"] = "hunt mode."
+        else:
+            hits = self._data["hits_since_last_sink"]
+            self._data["message"] = "kill mode."
+            if len(hits) == 1:
+                targets = board.coords_around(hits[-1], untargeted=True)
+                self._data["message"] += " Searching around last hit."
+            elif len(hits) > 1:
+                targets = board.colinear_target_coords(hits)
+                self._data["message"] += " Searching along colinear hits."                    
+            else:
+                raise Exception("hits_since_last_sink should not be empty.")
+        if not targets:
+            self._data["state"] = "hunt"
+            self._data["message"] += " No viable target found; " \
+                "reverting to hunt mode. "
+            targets = board.all_coords(untargeted=True)
+        return targets
+            
+    def placement_for_ship(self, board, ship):
+        """Returns a coordinate and heading that is not touching another ship.
+        """
+        if not isinstance(ship, Ship):
+            ship = Ship(ship)
+        sites = board.all_valid_placements(ship.length,
+                                           distance = 1, 
+                                           diagonal = False)
+        coord, heading = random_choice(sites)
+        return coord, heading
+    
+    def update_data(self, outcome):
+        """Updates strategy_data based on the last targeted space and the
+        resulting outcome.
+        """
+        last_target = outcome["coord"]
+        
+        self._data["last_target"] = last_target
+        if outcome["sunk_ship_id"]:
+            self._data["state"] = "hunt"
+            self._data["last_hit"] = last_target
+            self._data["current_target_id"] = None
+            self._data["last_sink_id"] = outcome["sunk_ship_id"]
+            self._data["hits_since_last_sink"] = []
+        elif outcome["hit"]:
+            self._data["state"] = "kill"
+            self._data["last_hit"] = last_target
+            self._data["hits_since_last_sink"] += [last_target]
+        else:
+            self._data["last_miss"] = last_target
+        self._data["message"] = None
         
 #%%
 class Board:
@@ -615,7 +812,7 @@ class Board:
     target grid where hit/miss indicators are placed to keep track of 
     opponent ships.
     """
-    
+
     def __init__(self, size=10):
         self.size = size
         self.fleet = {}
@@ -636,7 +833,7 @@ class Board:
         s += (" ".join([str(x) for x in np.arange(self.size) + 1]) 
               + "\n")
         for (r,row) in enumerate(self.target_grid):
-            s += (self.row_label(r) 
+            s += (Coord(r,0).lbl[0]
                   + " "
                   + " ".join(["-" if x == TargetValue.UNKNOWN else 
                               'O' if x == TargetValue.MISS else
@@ -647,71 +844,21 @@ class Board:
               + " ".join([str(x) for x in np.arange(self.size) + 1]) 
               + "\n")
         for (r,row) in enumerate(self.ocean_grid):
-            s += (self.row_label(r) 
+            s += (Coord(r,0).lbl[0]
                   + " "
                   + " ".join(["-" if x == 0 else 
                               str(x) for x in row]) 
                   + "\n")
         return s
     
-    # Coordinate functions
-    # def index_for_coord(self, coord):
-    #     """Returns a tuple containing the row/column indices that correspond
-    #     to the input coordinate.
-    #     For example, index_for_coord('B4') returns (1,3).
-    #     """
-    #     max_letter = chr(LETTER_OFFSET + self.size - 1)
-    #     m = re.search(f"[A-{max_letter}][1-9][0-9]?", coord)
-    #     if m:
-    #         row = ord(m.string[0].upper()) - LETTER_OFFSET
-    #         col = int(m.string[1:]) - 1
-    #     else:
-    #         raise ValueError(f"Input coordinate {coord} must be a string consisting"
-    #                          f" of a letter A-J followed by a number 1-10.")
-    #     if row < 0 or row >= self.size or col < 0 or col >= self.size:
-    #         raise ValueError(f"Input space '{coord}' did not "
-    #                          f"produce row and column values between 1 and "
-    #                          f"{self.size}.")
-    #     return (row, col)
+    def reset(self):
+        """Removes all ships and pegs from the board."""
+        board = Board(self.size)
+        self.fleet = board.fleet
+        self.target_grid = board.target_grid
+        self.ocean_grid = board.ocean_grid
         
-    # def coord_for_index(self, index):
-    #     """Returns a list of Space strings corresponding to the input row/column
-    #     tuple."""
-    #     if isinstance(index, list):
-    #         return [self.coord_for_index(i) for i in index]
-        
-    #     row,col = index
-    #     if ((row < 0) or (row >= self.size) or 
-    #             (col < 0) or (col >= self.size)):
-    #         raise ValueError(f"Rows and cols must be between 0 and " 
-    #                          f"{self.size}.")
-    #     return chr(row + LETTER_OFFSET) + str(col+1)
-        
-    # def row_label(self, row):
-    #     """Returns the label of the input row index. Rows 0-9 correspond to
-    #     labels A-J (or however big the board is)."""
-    #     if row < 0 or row >= self.size:
-    #         raise ValueError(f"Input row must be between 0 and {self.size}.")
-    #     return chr(LETTER_OFFSET + row)
-    
-    # def all_indices(self, untargeted=False, unoccuppied=False):
-    #     """Returns a list of all row/column index pairs on the board. If 
-    #     untargeted is True, only indices that have not been targeted are 
-    #     returned. If unoccuppied is True, only indices with no ships on the
-    #     board's ocean grid are returned."""
-    #     all_indices = [(r,c) for r in range(self.size) 
-    #                    for c in range(self.size)]
-    #     if untargeted and unoccuppied:
-    #         raise ValueError("untargeted and unoccuppied cannot both be True.")
-    #     if untargeted:
-    #         exclude = list(zip(
-    #             np.where(self.target_grid != TargetValue.UNKNOWN)))
-    #     elif unoccuppied:
-    #         exclude = list(zip(np.where(self.ocean_grid != 0)))
-    #     else:
-    #         return all_indices
-    #     return [i for i in all_indices if i not in exclude]
-        
+    # Coordinate functions        
     def all_coords(self, untargeted=False, unoccuppied=False,
                    targeted=False, occuppied=False):
         """Returns a list of all coordinates on the board.
@@ -809,9 +956,9 @@ class Board:
         If untargeted is True, then only untargeted coordinates will be chosen.
         """
         if unoccuppied:
-            exclude = self.occuppied_indices()
+            exclude = self.all_coords(occuppied=True)
         if untargeted:
-            exclude = self.targeted_indices()
+            exclude = self.all_coords(targeted=True)
         else:
             exclude = []
         
@@ -841,7 +988,7 @@ class Board:
             exclude = []
             
         ds = (np.diff(np.array(coords), axis=0))
-        ia,ib = coords[0],coords[-1]
+        ia,ib = sorted([coords[0], coords[-1]])
         choices = []
         
         # If vertical, find the next miss or unknown N/S of the line
@@ -861,22 +1008,51 @@ class Board:
         # If horizontal, find the next miss or unknown E/W of the line
         elif np.any(ds[:,1] != 0):
             while (ia[1] >= 0 and ia[1] < self.size and 
-                   self.target_grid[ia] != TargetValue.UNKNOWN):
+                   self.target_grid[ia] == TargetValue.HIT):
                 ia = (ia[0], ia[1] - 1)
             while (ib[1] >= 0 and ib[1] < self.size and 
-                   self.target_grid[ib] != TargetValue.UNKNOWN):
+                   self.target_grid[ib] == TargetValue.HIT):
                 ib = (ib[0], ib[1] + 1)
-            if ia[1] >= 0:
+            if (ia[1] >= 0 and 
+                    self.target_grid[ia] == TargetValue.UNKNOWN):
                 choices += [ia]
-            if ib[1] < self.size:
+            if (ib[1] < self.size and 
+                    self.target_grid[ib] == TargetValue.UNKNOWN):
                 choices += [ib]
         
         return [c for c in choices if c not in exclude]
-        # if not choices:
-        #     return None
-        # return self.coord_for_index(
-        #     choices[np.random.choice(range(len(choices)))])
+                
+    # Ship access functions
+    def afloat_ships(self):
+        """Returns a list of the Ship instances that are still afloat."""
+        return np.array([ship.afloat() for ship in list(self.fleet.values())])
+            
+    def coord_for_ship(self, ship):
+        """Returns the row/col coordinates occuppied by the input Ship instance."""
+        r,c = np.where(self.ocean_grid == ship.ship_id)
+        return list(zip(r,c))
     
+    def ship_at_coord(self, coord):
+        """Returns the Ship object placed at the input coordinate.
+        If no ship is present at the input space, returns None.
+        """
+        ship_id = self.ocean_grid[coord[0],coord[1]]
+        if ship_id == 0:
+            return None
+        return self.fleet[ShipType(ship_id)]
+    
+    def damage_at_coord(self, coord):
+        """Returns the damage at the slot corresponding to the input coordinate.
+        If no ship is present or if the ship is not damaged at that particular
+        slot, returns 0. Otherwise, if that spot has been hit, returns 1.
+        """
+        ship = self.ship_at_coord(coord)
+        if not ship:
+            return 0
+        coords = self.coord_for_ship(ship)
+        return ship.damage[coords.index(coord)]
+    
+    # Ship placement functions        
     def all_valid_placements(self, length, distance=0, diagonal=False):
         """Returns a list of all possible placements (consisting of row, 
         column, and heading) on the board. The distance parameter controls
@@ -885,7 +1061,7 @@ class Board:
         ((row, column), heading).
         """
         headings = {"N": (1,0), "S": (-1,0), "E": (0,-1), "W": (0,1)}
-        unoccuppied = self.unoccuppied_indices()
+        unoccuppied = self.all_coords(unoccuppied=True)
         placements = []
         for unocc in unoccuppied:
             for h in ["N","S","E","W"]:
@@ -899,40 +1075,12 @@ class Board:
                         ok = False
                 if distance > 0 and ok:
                     for (r,c) in zip(rows, cols):
-                        surrounding = zip(*self.indices_around((r,c), diagonal))
+                        surrounding = zip(*self.coords_around((r,c), diagonal))
                         if np.any(self.ocean_grid[tuple(surrounding)]):
                             ok = False
                 if ok:
                     placements += [(unocc, h)]
         return placements
-                
-    # Ship access functions
-    def afloat_ships(self):
-        """Returns a list of the Ship instances that are still afloat."""
-        return np.array([ship.afloat() for ship in list(self.fleet.values())])
-            
-    def coord_for_ship(self, ship):
-        """Returns the row/col coordinates occuppied by the input Ship instance."""
-        r,c = np.where(self.ocean_grid == ship.ship_id)
-        return list(zip(r,c))
-    
-    def ship_at_coord(self, index):
-        """Returns the Ship object placed at the input coordinate.
-        If no ship is present at the input space, returns None.
-        """
-        ship_id = self.ocean_grid[index]
-        if ship_id == 0:
-            return None
-        return self.fleet[ShipType(ship_id)]
-    
-    # Ship placement functions
-    def reset(self):
-        """Removes all ships and pegs from the board."""
-        board = Board(self.size)
-        self.fleet = board.fleet
-        self.target_grid = board.target_grid
-        self.ocean_grid = board.ocean_grid
-        
     def place_ship(self, ship_desc, coord, heading):
         """Places a ship corresponding to the input ship_desc (which may be an
         integer 1-5 or a string like "Patrol", "Carrier", etc.)
@@ -1000,20 +1148,20 @@ class Board:
     def random_coord(self, unoccuppied=False, untargeted=False):
         """Returns a random row/col coordinate from the board.
         
-        If the unoccuppied input is True, the index will be one that does 
+        If the unoccuppied input is True, the coordinate will be one that does 
         not contain a ship on this board's ocean grid (note that if this is 
         used publically, this could reveal ship locations).
                     
-        If the untargeted input is True, the index will be one that has
+        If the untargeted input is True, the coordinate will be one that has
         not been shot at from this board (i.e., no peg on the target grid).
         """
         if unoccuppied and untargeted:
             raise ValueError("Inputs unoccuppied and untargeted cannot both \
                              be true.")
         if unoccuppied:
-            exclude = self.occuppied_indices()
+            exclude = self.all_coords(occuppied=True)
         elif untargeted:
-            exclude = self.targeted_indices()
+            exclude = self.all_coords(targeted=True)
         else:
             exclude = []
         indices = [(i,j) for i in range(self.size) 
@@ -1066,14 +1214,14 @@ class Board:
             coord = coord.rowcol
         ship = self.ship_at_coord(coord)
         if not ship:
-            outcome = {"hit": False, "sunk": False, "sunk_ship_id": None,
-                       "message": []}
+            outcome = {"hit": False, "coord": coord, 
+                       "sunk": False, "sunk_ship_id": None, "message": []}
         else:
-            outcome = {"hit": True, "sunk": False, "sunk_ship_id": None,
-                       "message": []}
-            ship_indices = self.index_for_ship(ship)
-            dmg_slot = [i for i in range(len(ship_indices)) 
-                      if ship_indices[i] == coord]
+            outcome = {"hit": True, "coord": coord, "sunk": False, 
+                       "sunk_ship_id": None, "message": []}
+            ship_coords = self.coord_for_ship(ship)
+            dmg_slot = [i for i in range(len(ship_coords)) 
+                      if ship_coords[i] == coord]
             if len(dmg_slot) != 1:
                 raise Exception(f"Could not determine damage location for \
                                 target {coord}")
@@ -1121,7 +1269,7 @@ class Board:
         for ship_id in self.fleet:
             ship = self.fleet[ship_id]
             dmg = ship.damage
-            rows,cols = zip(*self.index_for_ship(ship))
+            rows,cols = zip(*self.coord_for_ship(ship))
             im[rows,cols] = dmg + 1
         return im
 
@@ -1139,14 +1287,51 @@ class Board:
         """
         rects = {}
         for ship in list(self.fleet.values()):
-            rows, cols = zip(*self.index_for_ship(ship))
+            rows, cols = zip(*self.coord_for_ship(ship))
             rects[ship.ship_id] = np.array((np.min(cols)+0.5, 
                                             np.min(rows)+0.5,
                                             np.max(cols) - np.min(cols) + 1, 
                                             np.max(rows) - np.min(rows) + 1))
         return rects
         
-    def show_board(self):
+    def color_str(self):
+        """Returns a string in color that represents the state of the board.
+        to a human player.
+        """
+        
+        ocean = "\x1b[1;44;31m "
+        ship_hit = "\x1b[1;41;37m"
+        ship_no_hit = "\x1b[2;47;30m"
+        red_peg = "\x1b[1;44;31mX"
+        red_peg_sunk = "\x1b[1;44;31m"
+        white_peg = "\x1b[1;44;37m0"
+        
+        s = "\n  "
+        s += (" ".join([str(x) for x in np.arange(self.size) + 1]) 
+              + "\n")
+        for (r,row) in enumerate(self.target_grid):
+            s += (Coord(r,0).lbl[0]
+                  + " "
+                  + " ".join([ocean if x == TargetValue.UNKNOWN else 
+                              white_peg if x == TargetValue.MISS else
+                              red_peg if x == TargetValue.HIT else 
+                              (red_peg_sunk + str(x)) for x in row]) 
+                  + "\033[0;0m\n")
+        s += ("\n  " 
+              + " ".join([str(x) for x in np.arange(self.size) + 1]) 
+              + "\n")
+        for (r,row) in enumerate(self.ocean_grid):
+            s += (Coord(r,0).lbl[0]
+                  + " "
+                  + " ".join([ocean if x == 0 else 
+                              (ship_hit + str(x)) if 
+                              self.damage_at_coord((r,c)) > 0 else
+                              (ship_no_hit + str(x)) 
+                              for (c,x) in enumerate(row)]) 
+                  + "\033[0;0m\n")
+        return s
+    
+    def show(self):
         """Shows images of the target map and grid on a figure with two 
         subaxes. Colors the images according to hit/miss (for target map) and
         damage (for the grid). Returns the figure containing the images.
@@ -1205,7 +1390,7 @@ class Board:
         # add pegs
         rows,cols = np.where(flat_grid == 2)
         red_pegs = [plt.Circle((x,y), radius=peg_radius, 
-                               color = hit_color, 
+                               facecolor = hit_color, 
                                edgecolor = peg_outline_color) 
                     for (x,y) in zip(cols+1,rows+1)]
         for peg in red_pegs:
@@ -1214,14 +1399,14 @@ class Board:
         # vertical grid
         rows,cols = np.where(vert_grid == TargetValue.MISS)
         white_pegs = [plt.Circle((x,y), radius=peg_radius, 
-                                 color = miss_color, 
+                                 facecolor = miss_color, 
                                  edgecolor = peg_outline_color) 
                     for (x,y) in zip(cols+1,rows+1)]
         for peg in white_pegs:
             axs[0].add_patch(peg) 
         rows,cols = np.where(vert_grid >= TargetValue.HIT)
         red_pegs = [plt.Circle((x,y), radius=peg_radius, 
-                               color = hit_color, 
+                               facecolor = hit_color, 
                                edgecolor = peg_outline_color) 
                     for (x,y) in zip(cols+1,rows+1)]
         for peg in red_pegs:
