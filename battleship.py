@@ -8,10 +8,9 @@ Created on Mon Aug 15 12:11:29 2022
 
 #%%
 # Stuff to do:
-    # * Implement a Strategy class that can be given to a Player. The class
-    #   should implement methods 'target' and 'placement' to give a 
-    #   target when Player calls .pick_target, and .place_fleet (or whatever) 
-    #   for a given board and shot/outcome history.
+    # * Figure out how to organize Strategies, how to combine them, and how
+    #   to instantiate them. Like, how would a user call the API to use existing
+    #   classes, and make their own classes?
     #
     # * Separate Player class into AIPlayer and HumanPlayer subclasses.
     
@@ -19,16 +18,19 @@ Created on Mon Aug 15 12:11:29 2022
 import numpy as np
 import matplotlib as mpl
 from matplotlib import pyplot as plt
-from enum import IntEnum
+from enum import Enum, IntEnum
 import abc
+import re
 
-#%%
-# Constants
+#%% Constants
+
+# Hard-coded Constants
 # LETTER_OFFSET = 65
 # DEFAULT_BOARD_SIZE = 10
 MAX_ITER = 1000
     
-# Enums
+### Enums ###
+
 class ShipType(IntEnum):
     PATROL = 1
     DESTROYER = 2
@@ -43,7 +45,16 @@ class TargetValue(IntEnum):
     MISS = -1
     HIT = 0
     
-# Data
+class Align(Enum):
+    """Enum used to identify the directional alignment of ships; either 
+    VERTICAL or HORIZONTAL (or any, which allows either direction).
+    """
+    ANY = 0
+    VERTICAL = 1
+    HORIZONTAL = 2
+    
+### Data ###
+
 SHIP_DATA = {ShipType.PATROL: {"name": "Patrol".title(), "length": 2},
              ShipType.DESTROYER: {"name": "Destroyer".title(), "length": 3},
              ShipType.SUBMARINE: {"name": "Submarine".title(), "length": 3},
@@ -51,9 +62,11 @@ SHIP_DATA = {ShipType.PATROL: {"name": "Patrol".title(), "length": 2},
              ShipType.CARRIER: {"name": "Carrier".title(), "length": 5}
              }
 
-#%%
-# Text color escapes
+#%% Graphics classes
+
+### Text color escapes ###
 class fg:
+    """Foreground text colors."""
     Esc = "\033"
     White = Esc + "[1;37m"
     Yellow = Esc + "[1;33m"
@@ -81,6 +94,7 @@ class fg:
         return f"\033[38;2;{rgb[0]};{rgb[1]};{rgb[2]}m"
     
 class bg:
+    """Background text colors."""
     Esc = "\033"
     White = Esc + "[1;47m"
     Yellow = Esc + "[1;43m"
@@ -107,14 +121,24 @@ class bg:
         """
         return f"\033[48;2;{rgb[0]};{rgb[1]};{rgb[2]}m"    
 
-#%% Functions
+#%% Utility Functions
 
 def random_choice(x, p=None):
     """Returns a single randomly sampled element from the input list, tuple,
     or array."""
     return x[np.random.choice(range(len(x)), p=p)]
 
-def battleship_sim(ngames):
+def on_board(x, size):
+    """Returns True if x is a coordinate on a board with input size.
+    Practically, occurs when x is a coordinate or tuple with both elements
+    between 0 and size - 1.
+    """
+    x = tuple(x)    # convert from Coord or list
+    return (x[0] >= 0 and x[0] < size and x[1] >= 0 and x[1] < size)
+
+#%% Gameplay Functions
+
+def sim_games(ngames):
     p1 = Player("ai", ("random", "random.hunt"), name="Hunt-1")
     p2 = Player("ai", ("random", "random"), name="Rando-2")
     winner = []
@@ -134,6 +158,10 @@ def battleship_sim(ngames):
     return np.array(winner), np.array(nturns)
 
 def play_test(strat1, strat2):
+    """Plays a single game with players using the two input strategy 
+    descriptions. Each input is a tuple containing the player's placement
+    and offense strategies, respectively.
+    """
     p1 = Player("ai", strat1, name="#1 - " + "/".join(strat1))
     p2 = Player("ai", strat2, name="#2 - " + "/".join(strat2))
     g = Game(p1,p2,verbose=True)
@@ -176,6 +204,8 @@ class Coord:
             r,c = a
         elif isinstance(a, str):
             r,c = self._str_to_rc(a)
+        elif isinstance(a, np.ndarray) and len(a) == 2:
+            r,c = a[0], a[1]
 
         self._rowcol = r,c
         self._value = None
@@ -231,6 +261,13 @@ class Coord:
         """
         return self._rowcol[key]
     
+    def __add__(self, other):
+        """Adds another Coord or a 2-element tuple to the Coord object."""
+        return Coord((self[0] + other[0], self[1] + other[1]))
+    
+    def __repr__(self):
+        return f'Coord({self.rowcol})'
+    
 #%% Game Class
 
 class Game:
@@ -278,17 +315,18 @@ class Game:
         then game.play().
         """
         
-        self.game_id = game_id
-        
-        if isinstance(player1, Player):
-            self.player1 = player1
-        else:
-            self.player1 = Player(player1)
+        self._game_id = game_id
+        self._player1 = player1
+        self._player2 = player2
+        # if isinstance(player1, (HumanPlayer, AIPlayer)):
+        #     self.player1 = player1
+        # else:
+        #     self.player1 = Player(player1)
             
-        if isinstance(player2, Player):
-            self.player2 = player2
-        else:
-            self.player2 = Player(player2)
+        # if isinstance(player2, (HumanPlayer, AIPlayer)):
+        #     self.player2 = player2
+        # else:
+        #     self.player2 = Player(player2)
             
         self.ready = False
         self.winner = None
@@ -296,12 +334,28 @@ class Game:
         self.turn_count = 0
         self.verbose = verbose
         
+    @property
+    def game_id(self):
+        return self._game_id
+    
+    @game_id.setter
+    def game_id(self, value):
+        self._game_id = value
+        
+    @property
+    def player1(self):
+        return self._player1
+    
+    @property
+    def player2(self):
+        return self._player2
+    
     def setup(self):
         """Set up a game by placing both fleets."""
-        self.player1.set_opponent(self.player2)
-        self.player2.set_opponent(self.player1)
-        self.player1.set_up_fleet()
-        self.player2.set_up_fleet()
+        self.player1.opponent = self.player2
+        self.player2.opponent = self.player1
+        self.player1.prepare_fleet()
+        self.player2.prepare_fleet()
         self.ready = (self.player1.board.ready_to_play() and 
                       self.player2.board.ready_to_play())
             
@@ -362,7 +416,7 @@ class Game:
             hit_or_miss = "Miss."
         if outcome["sunk_ship_id"]:
             sink = SHIP_DATA[outcome["sunk_ship_id"]]["name"] + " sunk!"
-        print(f"Turn {len(player.shot_log)}: Player {name} fired a shot at "
+        print(f"Turn {len(player.shot_history)}: Player {name} fired a shot at "
               f"{target}...{hit_or_miss} {sink}")
         
     def print_outcome(self):
@@ -373,61 +427,67 @@ class Game:
         print("GAME OVER!")
         print("Player " + self.winner.name + " wins.")
         print("  Player " + self.winner.name + " took " \
-              + str(len(self.winner.shot_log)) + " shots, and sank " \
+              + str(len(self.winner.shot_history)) + " shots, and sank " \
               + str(sum(1 - self.loser.board.afloat_ships())) + " ships.")
         print("  Player " + self.loser.name + " took " \
-              + str(len(self.loser.shot_log)) + " shots, and sank " \
+              + str(len(self.loser.shot_history)) + " shots, and sank " \
               + str(sum(1 - self.winner.board.afloat_ships())) + " ships.")
         print("Game length: " + str(self.turn_count) + " turns.")
         print("(Game ID: " + str(self.game_id) + ")")
         print("")
             
 # %% Player Class
-class Player:
-    """A Battleship player that has access to a board on which a game
-    can be played. The player can be human or AI. In the case of human,
-    this class provides an interface for selecting targets. In the case of
-    an AI, the class has a 'strategy' that automatically selects targets.
+
+class Player(abc.ABC):
+    """An abstract class that can play a game of Battleship.
+    This class provides the superclass for two concrete subclasses:
+    AIPlayer and HumanPlayer.
     
-    Valid placement strategies are:
-        random, cluster, isolated, very.isolated
-        
-    Valid offense strategies are:
-        random, random.hunt.dumb, random.hunt
+    All Player instances must implement the following attributes and methods:
+    
+    Abstract Properties/Methods:
+    - player_type (property)
+    - take_turn (method)
+    - prepare_fleet (method)
+    
+    Properties
+    - name
+    - offense (optional for HumanPlayer)
+    - defense (optional for HumanPlayer)
+    - shot_history
+    - outcome_history
+    - board
+    - opponent
+    - possible_targets
+    - remaining_targets
+    - set_opponent
+    
+    Other methods
+    - __init__
+    - __str__
+    - reset
+    - copy_history_from
+    - last_target
+    - last_outcome
+    - isalive
+    - fire_at_target
+    - place_fleet_using_defense
+    - show_possible_targets
     """
     
-    def __init__(self, player_type, strategy, name=None):
-        if player_type.lower() == "human":
-            self.type = "Human"
-        elif player_type.lower() == "robot" or player_type.lower() == "ai":
-            self.type = "Robot"     
-            
-        if isinstance(strategy, str):
-            strategy = (strategy, strategy)
-        
-        self.strategy = {'placement': strategy[0], 
-                         'offense': strategy[1]}
-        if self.type.lower() == "human":
-            self.strategy['offense'] = "manual"
-            
-        self.strategy_data = {"state": "hunt",
-                              "last_hit": None,
-                              "last_miss": None,
-                              "last_target": None,
-                              "current_target_id": None,
-                              "last_sink_id": None,
-                              "hits_since_last_sink": [],
-                              "message": None}
-
-        self.name = name
-        
-        # the following variables may change with each game:
-        self.shot_log = []
-        self.outcome_log = []
-        self.board = Board()
-        self.opponent = None
-        self.remaining_targets = self.board.all_coords()
-        self.possible_targets = []
+    ### Initializers and Such ###
+    
+    def __init__(self, name="", board=None):
+        """Initialize an instance of the class with the input name.
+        This should be called by the __init__ method of a concrete subclass.
+        """
+        self._player_type = None
+        self._name = name
+        self._shot_history = []
+        self._outcome_history = []
+        self._remaining_targets = []
+        self._possible_targets = None
+        self._board = board
         
         self.game_history = None    # for future use
         self.notes = None           # for future use
@@ -436,252 +496,232 @@ class Player:
         """Returns a string indicating player type, strategy, and any strategy
         data.
         """
-        strat1 = self.strategy["placement"]
-        strat2 = self.strategy["offense"]
         return f"Player {self.name}\n" \
-            f"  Type: {self.type}\n" \
-            f"  Placement strategy: {strat1}\n" \
-            f"  Offensive strategy: {strat2}\n" \
-            f"  Strategy data: {self.strategy_data}"
+            f"  Type: {self.player_type}\n" \
+            f"  Placement strategy: {type(self.defense)}\n" \
+            f"  Offensive strategy: {type(self.offense)}"
             
+    def turn_str(self):
+        s = (f"Player {self.name}" 
+             f"  Fired at coordinate {self.last_target()}")
+        if len(self.possible_targets) > 6:
+            s += (f"    Selected from {len(self.possible_targets)} "
+                  f"    potential targets.")
+        else:
+            s += (f"    Selected from potential targets:\n"
+                  f"    {self.potential_targets}")
+        if self.offense:
+            s += f"  Offense:\n{self.offense}"
+        outcome = self.last_outcome()
+        res = (SHIP_DATA[ShipType(outcome["sunk_ship_id"])]["name"] + " sunk" 
+               if outcome["sunk"] else 
+               "hit" if outcome["hit"] else "miss")
+        s += f"Result: {res}"
+        s += f"Outcome:\n{self.last_outcome()}"
+        return s
+        
+    ### Abstract Property ###
+    @property
+    @abc.abstractmethod
+    def player_type(self):
+        """A string describing the player type: AI or Human."""
+        pass
+    
+    ### Abstract Method ###
+    @abc.abstractmethod
+    def take_turn(self): 
+        """Fire a shot at the opponent, get the outcome, and update any
+        strategy-related variables."""
+        pass
+    
+    @abc.abstractmethod
+    def prepare_fleet(self):
+        """Put each ship onto the board."""
+        pass
+    
+    ### Properties ###
+    @property
+    def name(self):
+        """The name of the player (string)."""
+        return self._name
+    
+    @name.setter
+    def name(self, name):
+        self._name = name
+       
+    @property
+    def offense(self):
+        """An offense strategy (subclass of Offense). Optional for 
+        instances of HumanPlayer, required for instances of AIPlayer.
+        """
+        return self._offense
+    
+    @offense.setter
+    def offense(self, offense):
+        self._offense = offense
+
+    @property    
+    def defense(self):
+        """A defense strategy (subclass of Defense). Optional for 
+        instances of HumanPlayer, required for instances of AIPlayer.
+        """
+        return self._defense
+    
+    @defense.setter
+    def defense(self, defense):
+        self._defense = defense
+    
+    @property
+    def shot_history(self):
+        """A list of coordinates (2-element tuples or instances of Coord) 
+        with ith element corresponding to the coordiate targeted in the ith
+        shot taken by the player. Reset before the start of a new game using
+        the reset() method.
+        """
+        return self._shot_history
+    
+    def add_shot_to_history(self, coord):
+        """Adds the input coordinate to the shot history list."""
+        self._shot_history += [coord]
+        
+    @property
+    def outcome_history(self):
+        """A list of outcome dictionaries describing the result of a turn.
+        The ith element corresponds to the outcome of the ith turn taken by 
+        the player. Reset before the start of a new game using the reset() 
+        method.
+        """
+        return self._outcome_history
+    
+    def add_outcome_to_history(self, outcome):
+        """Adds the input outcome dictionary to the outcome history list.
+        The outcome input should have keys 'hit', 'coord', 'sunk',
+        'sunk_ship_id', and 'message'.
+        """
+        self._outcome_history += [outcome]
+        
+    @property
+    def board(self):
+        """The instance of Board used by the player to hold their fleet,
+        track damage, and track shot target locations.
+        """
+        return self._board
+    
+    @board.setter
+    def board(self, board):
+        self._board = board
+        
+    @property
+    def opponent(self):
+        """An instance of Player that corresponds to the current opponent.
+        This is usually set by an instance of Game.
+        """
+        return self._opponent
+    
+    @opponent.setter
+    def opponent(self, opponent):
+        """Sets the opponent variable to the input Player.
+        """
+        if isinstance(opponent, (HumanPlayer, AIPlayer)):
+            self._opponent = opponent
+        else:
+            raise TypeError("Input must be a Player object.")
+            
+    @property
+    def possible_targets(self):
+        """The list of potential targets, as determined by the offense
+        strategy. The chosen target will be randomly selected from this list.
+        """
+        return self._possible_targets
+    
+    @property
+    def remaining_targets(self):
+        """Returns a list of coordinates that have not yet been targeted during
+        the current game.
+        """        
+        return self._remaining_targets
+    
+    ### General Methods ###
+    
     def reset(self):
         """Removes all ships and hit/miss indicators from the player's board,
         and empties out the shot and outome logs. The opponent remains the 
         same until changed usint set_opponent.
         """
-        self.shot_log = []
-        self.outcome_log = []
+        self._shot_history = []
+        self._outcome_history = []
         self.board.reset()
-        self.remaining_targets = self.board.all_coords()
-        self.strategy_data = Player(self.type, (self.strategy["placement"],
-                                                self.strategy["offense"])).strategy_data
+        self._remaining_targets = self.board.all_coords()
         
-    def opponents_board(self):
-        """Returns the opponent's Board."""
-        return self.opponent.board
-        
-    def random_ship_placement(self, method, ship_id=None):
-        """Returns a random ship placement (Coord and heading) for the input 
-        method and ship type.
-        """ 
-        if method == "random":
-            coord = self.board.random_coord(unoccuppied=True)
-            heading = self.board.random_heading()
-            
-        elif method in ["cluster", "clustered"]:
-            X,Y = np.meshgrid(range(self.board.size), range(self.board.size))
-            D = np.zeros(X.shape)
-            for ship in list(self.board.fleet.values()):
-                coords = self.board.coord_for_ship(ship)
-                rows,cols = zip(*coords)
-                for (r,c) in zip(rows,cols): 
-                    D = D + (X - c)**2 + (Y - r)**2
-            coords = self.board.all_coords(unoccuppied=True)
-            prob = np.zeros(len(coords))
-            for (i,rc) in enumerate(coords):
-                prob[i] = 1 / (1 + D[rc[0],rc[1]])
-            prob = np.array(prob)
-            prob = prob / np.sum(prob)
-            coord = random_choice(coords, p=prob)
-            heading = self.board.random_heading()
-            
-        elif (method == "isolated" or method in 
-              ["veryisolated", "very.isolated", "very isolated", 
-               "very_isolated", "isolated+"]):
-            # find a placement that is not touching another ship
-            sites = self.board.all_valid_placements(
-                SHIP_DATA[ShipType(ship_id)]["length"],
-                distance=1, diagonal=(method != "isolated"))
-            coord, heading = random_choice(sites)
-        
-        return coord, heading
+    def copy_history_from(self, other):
+        """Copies shot and outcome histories from the input Player instance
+        into this Player's histories (overwriting any existing histories).
+        Also copies over the remaining_targets, game_history, and notes 
+        properties, and sets the possible_targets list to None.
+        """
+        self._shot_history = other.shot_history
+        self._outcome_history = other.outcome_history
+        self._remaining_targets = other.remaining_targets
+        self.possible_targets = None
+        self.game_history = other.game_history
+        self.notes += other.notes
     
-    def place_fleet_randomly(self, method):
-        """Places all 5 ships randomly on the board, with randomization method
-        set by the 'method' input. This input can be 'random', 'cluster', 
-        'isolated', or 'very.isolated'.
+    def last_target(self):  
+        """Returns the most recently targeted coordinate, or None if no shot
+        has been taken yet.
         """
-        method = method.lower()
-        for ship_id in SHIP_DATA:
-            ok = False
-            counter = 0
-            while not ok and counter < MAX_ITER:
-                coord, heading = self.random_ship_placement(method, ship_id)
-                ok = self.board.is_valid_ship_placement(ship_id, coord, heading)
-                counter += 1
-            if not ok:
-                raise Exception("Max ship placement repetions has been reached.")
-            self.board.place_ship(ship_id, coord, heading)
-        return ok
-            
-    def set_up_fleet(self): 
-        """Place ships in the fleet either manually via text input (for Human
-        player) or according to the placement strategy.
-        """
-        if self.type == "Human" and self.strategy["placement"] != "random":
-            self.place_fleet_manually()
-        else:
-            self.place_fleet_randomly(self.strategy["placement"])
-                
-    def place_fleet_manually(self):
-        """Provides a text-based interface on the console for fleet placement.
-        """
-        for i in range(1,len(SHIP_DATA)+1):
-            ok = False
-            name = SHIP_DATA[ShipType(i)]["name"]
-            while not ok:
-                coord = Coord(input("Space for {name.upper())}: "))
-                heading = input("Heading for {name.upper())}: ")                
-                if not self.board.is_valid_ship_placement(i, coord, heading):
-                    ok = False
-                    print("Invalid placement.")
-                else:
-                    self.board.place_ship(i, coord, heading)
-                    print(name + " placed successfully (" 
-                          + str(i) + " of " + str(len(SHIP_DATA)) + ").")
-        print("Fleet placed successfully.")  
-        return ok
-        
-    def last_target(self, as_lettnum=False):  
-        """Returns the most recently targeted space. Defaults to row/column 
-        indices for output, but returns a letter/number string if the as_lettnum
-        input is set to True.
-        """
-        if not self.shot_log:
+        if not self.shot_history:
             return None
         else:
-            return self.shot_log[-1]
+            return self.shot_history[-1]
         
     def last_outcome(self): 
-        """Returns the outcome of the last shot."""
-        if not self.outcome_log:
+        """Returns the outcome of the last shot, or None if no shot has been 
+        taken yet.
+        """
+        if not self.outcome_history:
             return None
         else:
-            return self.outcome_log[-1]
-    
-    def set_opponent(self, other_player): 
-        """Sets the opponent variable to the input Player.
-        Should also do the same for the other player (this does not happen 
-        automatically so as to avoid circular referencing).
-        """
-        if isinstance(other_player, Player):
-            self.opponent = other_player
-        else:
-            raise TypeError("other_player must be an instance of Player.")
-            
+            return self.outcome_history[-1]
+        
     def isalive(self): 
         """Returns true if any of this players ships are still afloat."""
         return any(self.board.afloat_ships())
-
-    def take_turn(self): 
-        """Fire a shot at the opponent, get the outcome, and update any
-        strategy-related variables."""
-        
-        if self.type == "Human":
-            target = input("Enter target: ").upper()
-            if target in self.shot_log:
-                target = input((f"*** Space {target} has already been \
-                                targeted.\nEnter again to confirm, or select \
-                                another target: "))           
-        else:
-            target = self.pick_target()
-        return self.fire_at_target(target) 
     
-    def update_state(self, last_target, last_outcome):  
-        """Updates strategy_data based on the last targeted space and the
-        resulting outcome.
-        """
-        strat_data = self.strategy_data
-        strat_data["last_target"] = last_target
-        if last_outcome["sunk_ship_id"]:
-            strat_data["state"] = "hunt"
-            strat_data["last_hit"] = last_target
-            strat_data["current_target_id"] = None
-            strat_data["last_sink_id"] = last_outcome["sunk_ship_id"]
-            strat_data["hits_since_last_sink"] = []
-        elif last_outcome["hit"]:
-            strat_data["state"] = "kill"
-            strat_data["last_hit"] = last_target
-            strat_data["hits_since_last_sink"] += [last_target]
-        else:
-            strat_data["last_miss"] = last_target
-        strat_data["message"] = None
-        self.strategy_data = strat_data       
-            
-    def pick_target(self): 
-        """Returns a target coordinate string based on the player's strategy 
-        and shot/outcome history.
-        This is where the strategy is implemented.
-        """
-        if self.strategy["offense"] == "random":
-            targets = self.board.all_coords(untargeted=True)
-        
-        elif self.strategy["offense"] == "random.hunt.dumb":
-            # If in kill mode, fire around the most recent hit.
-            if self.strategy_data["state"] == "hunt":
-                targets = self.board.all_coords(untargeted=True)
-                self.strategy_data["message"] = "hunt mode."
-            else:
-                last_hit = self.strategy_data["last_hit"]
-                targets = self.board.coords_around(last_hit, untargeted=True)
-                self.strategy_data["message"] = "kill mode."
-            if not targets:
-                self.strategy_data["state"] = "hunt"
-                self.strategy_data["message"] += f" No viable target found " \
-                    f"around last hit {last_hit}; reverting to hunt mode. "
-                targets = self.board.all_coords(untargeted=True)
-
-        elif self.strategy["offense"] == "random.hunt":
-            # If in kill mode, find two hits in a row. Then fire in a line
-            # until a ship is sunk.
-            if self.strategy_data["state"] == "hunt":
-                targets = self.board.all_coords(untargeted=True)
-                self.strategy_data["message"] = "hunt mode."
-            else:
-                #last_hit = self.strategy_data["last_hit"]
-                hits = self.strategy_data["hits_since_last_sink"]
-                self.strategy_data["message"] = "kill mode."
-                if len(hits) == 1:
-                    targets = self.board.coords_around(hits[-1], untargeted=True)
-                    self.strategy_data["message"] += " Searching around last hit."
-                elif len(hits) > 1:
-                    targets = self.board.colinear_target_coords(hits)
-                    self.strategy_data["message"] += " Searching along colinear hits."                    
-                else:
-                    raise Exception("hits_since_last_sink should not be empty.")
-            if not targets:
-                self.strategy_data["state"] = "hunt"
-                self.strategy_data["message"] += " No viable target found; " \
-                    "reverting to hunt mode. "
-                targets = self.board.all_coords(untargeted=True)
-            
-        else:
-            s = self.strategy["offense"]
-            raise ValueError(f"Invalid offensive strategy: {s}")
-            
-        self.possible_targets = targets
-        return random_choice(targets)  
-            
-        
     def fire_at_target(self, target_coord): 
         """Fires a shot at the input target space and handles the resulting
         outcome. If the shot results in a hit, the opponent's ship is damaged.
         The Player's board is updated with a hit or miss value at the 
         target_space.
-        Returns a Space enum value (MISS or HIT).
+        Returns an outcome dictionary with the following keys:
+            - hit
+            - coord
+            - sunk
+            - sunk_ship_id
+            - message
         """
         outcome = self.opponent.board.incoming_at_coord(target_coord)
         self.board.update_target_grid(target_coord, 
                                      outcome["hit"], 
                                      outcome["sunk_ship_id"])
-        self.shot_log += [target_coord]
+        self.add_shot_to_history(target_coord)
+        self.add_outcome_to_history(outcome)
         if target_coord in self.remaining_targets:
             self.remaining_targets.pop(self.remaining_targets.index(target_coord))
-        self.outcome_log += [outcome]
-        self.update_state(target_coord, outcome)
+
+        ### This has to be impelmented in subclass!
+        if self.offense:
+            self.offense.update(outcome)
+        ###
+        
         return outcome
-    
-    def show_attack(self):
+   
+    def place_fleet_using_defense(self, defense):
+        """Place the fleet ship-by-ship according to the input defense."""
+        placements = defense.fleet_placements(self.board)
+        self.board.place_fleet(placements)
+        
+    def show_possible_targets(self):
         """Shows the board for the player, along with possible targets."""
         fig = self.board.show()
         axs = fig.axes
@@ -700,110 +740,1000 @@ class Player:
         ax.add_patch(target_circ)
         for p in possibilities:
             ax.add_patch(p)
-     
-#%%
-class Strategy(metaclass=abc.ABCMeta):
-    """A set of instructions that determines how an AI player places ships on
-    a board and chooses targets. 
-    An Strategy instance knows about the state of the board as well as the
-    history of shot coordinates, history of shot outcomes, and the turn number.
+            
+#%% Concrete Player Subclasses
+
+class HumanPlayer(Player):
+    """An concrete subclass of Player provides an interface so a Human user
+    can play a game of Battleship.
     
-    An instance of Strategy should implement two methods:
-        .pick_target(board, outcome_history)
-        .placement_for_ship(board, ship)
+    All Player instances must implement the following attributes and methods:
+    
+    Abstract Properties/Methods:
+    - player_type (property)
+    - take_turn (method)
+    - prepare_fleet (method)
+    
+    This particular subclass has the following properties and methods:
+        
+    Properties
+    - target_select_mode
+    - show_targets
+    
+    Other methods
+    - __init__
     """
-      
+    
+    ### Initializers and Such ###
+    
+    def __init__(self, offense=None, defense=None, name=""):
+        """
+        A subclass of Player that allows a Human user to interface with and
+        play a game of Battleship against an opponent (either Human or AI).
+
+        Parameters
+        ----------
+        offense : Offense subclass, optional
+            An instance of a subclass of Offense. Valid options include:
+                - RandomOffense
+                - HunterOffense(smart, spacing)
+            The default is None. 
+            
+        defense : Defense subclass, optional
+            An instance of a subclass of Offense. Valid options include:
+                - RandomDefense(alignment)
+                - ClusterDefense(alignment)
+                - IsolateDefense(alignment, diagonal, max_sep, separation)
+            The default is None. When it is the HumanPlayer's turn to place
+            their fleet, the player may either enter all ship locations and
+            headings manually, or allow the Defense subclass to place the ships.
+            
+        name : str, optional
+            A string used to idenfify the HumanPlayer instance. The default is "".
+
+        Returns
+        -------
+        None.
+
+        """
+        super().__init__(name)
+        
+        self.offense = offense
+        self.defense = defense
+            
+        self.show_targets = False
+        self._target_select_mode = "text" 
+        
+    ### Abstract Properties and Methods
+    @property
+    def player_type(self):
+        return "Human"
+    
+    def take_turn(self):
+        """Get a target from the human, and fire at that target on the opponent's
+        board.
+        """
+        if self.target_select_mode == "text":
+            print(self.board.color_str())
+            if self.outcome_history:
+                outcome = self.outcome_history[-1]
+                hitmiss = "hit" if outcome['hit'] else "miss"
+                print(f"Last shot: {outcome['coord']} -->> "
+                      f"{hitmiss}.")
+                outcome = self.opponent.outcome_history[-1]
+                hitmiss = "hit" if outcome['hit'] else "miss"
+                print(f"Opponent's last shot: {outcome['coord']} -->> "
+                      f"{hitmiss}.")
+                
+            target = Coord(input("Enter target: ").upper())
+            if target in self.shot_history:
+                target = input((f"*** Space {target} has already been \
+                                targeted.\nEnter again to confirm, or select \
+                                another target: ")) 
+        else:
+            raise AttributeError("Invalid target_select_mode.")
+        self.fire_at_target(target)
+        
+    def prepare_fleet(self):
+        """If a defense strategy (i.e., fleet placement) is provided, let
+        if determine how to set up the fleet. Otherwise, have the player
+        enter it manually.
+        """
+        if not self.board:
+            self.board = Board()
+            
+        if self.defense:
+            return self.place_fleet_using_defense(self.defense)
+        
+        for i in range(1,len(SHIP_DATA)+1):
+            ok = False
+            name = SHIP_DATA[ShipType(i)]["name"]
+            while not ok:
+                space = Coord(input("Space for {name.upper())} ('r' for random): "))
+                if space.lower == 'r':
+                    coord, heading = random_choice(
+                        self.board.random_placement(
+                            SHIP_DATA[ShipType(i)]["length"])
+                        )
+                else:
+                    coord = Coord(space)
+                    heading = input("Heading for {name.upper())}: ")                
+                if not self.board.is_valid_ship_placement(i, coord, heading):
+                    ok = False
+                    print("Invalid placement.")
+                else:
+                    self.board.place_ship(i, coord, heading)
+                    print(name + " placed successfully (" 
+                          + str(i) + " of " + str(len(SHIP_DATA)) + ").")
+        print("Fleet placed successfully.")  
+        return ok
+    
+    ### Properties ###
+    
+    @property
+    def target_select_mode(self):
+        return self._target_select_mode
+    
+    @target_select_mode.setter
+    def target_select_mode(self, value):
+        if value.lower() == "text":
+            self._target_select_mode = "text"
+        else:
+            raise ValueError("target_select_mode only supports 'text'.")
+        
+    ### Other Methods ###
+    
+    
+#%% AIPlayer
+class AIPlayer(Player):
+    
+    ### Initializers and Such ###
+    
+    def __init__(self, offense=None, defense=None, name=""):
+        """
+        A subclass of Player that generates ship placements and targets for
+        playing a game of Battleship against an opponent (either Human or AI).
+        The AIPlayer makes use of two input objects--a subclass of Offense and
+        a subclass of Defense--in order to make targeting and ship placement
+        decisions, respectively.
+        
+        See the Parameters below for supported Offense and Defense subclasses.
+        New subclasses of Offense/Defense may also be used, as long as they
+        implement the proper methods for targeting and ship placement (see
+        documentation for Offense and Defense).
+
+        Parameters
+        ----------
+        offense : Offense subclass, optional
+            An instance of a subclass of Offense. Valid options include:
+                - RandomOffense
+                - HunterOffense(smart, spacing)
+                
+            The default is None. 
+            
+        defense : Defense subclass, optional
+            An instance of a subclass of Offense. Valid options include:
+                - RandomDefense(alignment)
+                - ClusterDefense(alignment)
+                - IsolateDefense(alignment, diagonal, max_sep, separation)
+                
+            The default is None. When it is the HumanPlayer's turn to place
+            their fleet, the player may either enter all ship locations and
+            headings manually, or allow the Defense subclass to place the ships.
+            
+        name : str, optional
+            A string used to idenfify the HumanPlayer instance. 
+            The default is "".
+
+        Returns
+        -------
+        None.
+        """
+        super().__init__(name)
+        
+        self.offense = offense
+        self.defense = defense
+            
+        self.show_targets = False
+        self._target_select_mode = "text" 
+        
+    ### Abstract Properties and Methods
+    @property
+    def player_type(self):
+        return "AI"
+    
+    def take_turn(self):
+        """Get a target from the AI Player's strategy and fire at that 
+        coordinate.
+        """
+        self.fire_at_target(self.offense.target(self.board, 
+                                                self.outcome_history))
+        # self.offense.possible_targets contains the list of all potential
+        # targets from which one actual target was chosen randomly.
+        
+    def prepare_fleet(self):
+        """Place fleet according to the defense strategy."""
+        if not self.board:
+            self.board = Board()
+        return self.place_fleet_using_defense(self.defense)
+        
+#%% Offense
+
+class Offense(metaclass=abc.ABCMeta):
+    """
+    All Offense instances must implement the following attributes and methods:
+    
+    Abstract Properties/Methods:
+    - targets
+    - update
+    - __str__
+    
+    Properties
+    - possible_targets
+    
+    Other methods
+    - __init__
+    
+    Class methods
+    - from_strs
+    """
+    
+    ### Initializer ###
+    
+    def __init__(self, method=None, **kwargs):
+        if method:
+            self = Offense.from_strs(method, kwargs)
+        self._possible_targets = None
+        
+    ### Abstract Methods ###
+    
     @abc.abstractmethod
-    def pick_target(self, board, history):
+    def target(self, board, history):
         """Returns a target coordinate based on the input board and outcome 
         history. This is where the smarts are implemented.
         """
         pass
-     
+    
     @abc.abstractmethod
-    def placement_for_ship(self, board, ship):
-        """Returns a tuple with a coordinate and heading where the input 
-        ship should be placed. The placement should be valid for the input
-        board (not intersecting other ships and not over the board edge).
-        """
+    def update(self, outcome):
+        pass
+        
+    @abc.abstractmethod
+    def __str__(self):
         pass
     
-class IsolatedRandomHunter(Strategy):
-    """Placement strategy is Isolated, Offensive strategy is Random Hunter.
-    """
-        
-    def __init__(self):
-        self._data = {"state": "hunt",
-                      "last_hit": None,
-                      "last_miss": None,
-                      "last_target": None,
-                      "current_target_id": None,
-                      "last_sink_id": None,
-                      "hits_since_last_sink": [],
-                      "message": None}
-        
-    def pick_target(self, board, history):
-        """Hunt randomly until a ship is hit. Then search around the hit to 
-        find two adjacent hits. Then fire along that line until a ship is sunk 
-        or no other options remain (which may mean that the adjacent hits
-        were on two different ships).
+    ### Class factory method ###
+    
+    @classmethod
+    def from_strs(cls, method, **kwargs):
         """
-        # own_damage = [np.sum(ship.damage) for ship in list(board.fleet.values())]
-        # own_sunk = ~board.afloat_ships()
-        # nturns = len(history)
-        
-        if self._data["state"] == "hunt":
-            targets = board.all_coords(untargeted=True)
-            self._data["message"] = "hunt mode."
+        Allowable methods are:
+            "random"
+            "random.hunter"
+            "random.finisher" (not supported)
+            "random.dumb.hunter" or "random.hunter.dumb"
+            "grid.hunter" (needs a separate spacing = N argument, where N is an integer)          
+        """
+        method = method.lower().replace(".", "")
+        if "dumb" in method:
+            smart = False
+            method = method.replace("dumb", "")
         else:
-            hits = self._data["hits_since_last_sink"]
-            self._data["message"] = "kill mode."
-            if len(hits) == 1:
+            smart = True
+            
+        if method == "random":
+            return RandomOffense() 
+        elif method == "randomhunter" or method == "hunter":
+            return HunterOffense("random", smart=smart)
+        elif method == "gridhunter":
+            return HunterOffense("grid", spacing=kwargs["spacing"])
+        
+  
+#%% RandomOffense: Concrete Offense subclass
+
+class RandomOffense(Offense):
+    
+    """
+    All Offense instances must implement the following attributes and methods:
+    
+    Abstract Properties/Methods:
+    - target
+    - update
+    
+    Properties
+    - possible_targets
+    
+    Other methods
+    - __init__
+    
+    Class methods
+    - from_strs
+    """
+    
+    ### Initializer ###
+    
+    def __init__(self):
+        self._possible_targets = None
+        
+    def __str__(self):
+        return "Random Offense"
+    
+    ### Abstract Methods ###
+    
+    def target(self, board, history):
+        """Returns a target coordinate based on the input board and outcome 
+        history. This is where the smarts are implemented.
+        """
+        self.possible_targets = board.all_coords(untargeted=True)
+        return random_choice(self.possible_targets)
+    
+    def update(self, outcome):
+        pass
+        
+    
+        
+#%% HunterOffense subclass of Offense
+
+class HunterOffense(Offense):
+    
+    """
+    All Offense instances must implement the following attributes and methods:
+    
+    Abstract Properties/Methods:
+    - target
+    - update
+    
+    Properties
+    - possible_targets
+    
+    Other methods
+    - __init__
+    
+    Class methods
+    - from_strs
+    """
+    
+    class Mode(Enum):
+        HUNT = 1
+        KILL = 2
+        
+    ### Initializer ###
+    
+    def __init__(self, smart=True, spacing=None, barrage=0):
+        """
+        Hunter offensive class that hunts for ships using various methods and,
+        once a ship is hit, switches over to kill mode and searches the 
+        immediate vicinity of the hit until the location of a ship can
+        be determined and the ship sunk.
+
+        Parameters
+        ----------
+        smart : TYPE, optional
+            DESCRIPTION. The default is True.
+        spacing : TYPE, optional
+            DESCRIPTION. The default is None.
+        barrage: int, optional
+            When hunting for ships, this many shots will be fired in a cluster
+            before choosing another random coordinate to target.
+
+        Returns
+        -------
+        None.
+
+        """
+        self._possible_targets = None
+        self.smart = smart
+        self._mode = self.Mode.HUNT
+        self._hits_since_last_sink = []
+        self._message = None
+        self.hunt_method = "random"   # random, empty, grid
+        
+        # barrage mode
+        self._barrage = None
+        self._barrage_count = 0
+        
+        # grid mode
+        self.grid_spacing = spacing
+        self.gird_first_target = None
+        self.grid_direction = np.array((1,1))   # direction of step
+        self.grid_wrap = None
+        
+    ### Abstract Methods ###
+    
+    def target(self, board, history):
+        """Returns a target coordinate based on the input board and outcome 
+        history. This is where the smarts are implemented.
+        """
+        if self.mode == self.Mode.HUNT:
+            targets = self.hunt_targets(board)
+            self.message = "hunt mode."
+        else:
+            hits = self.hits_since_last_sink
+            self.message = "kill mode."
+            if len(hits) == 1 or not self.smart:
                 targets = board.coords_around(hits[-1], untargeted=True)
-                self._data["message"] += " Searching around last hit."
+                self.message += " Searching around last hit."
             elif len(hits) > 1:
                 targets = board.colinear_target_coords(hits)
-                self._data["message"] += " Searching along colinear hits."                    
+                self.message += " Searching along colinear hits."                    
             else:
                 raise Exception("hits_since_last_sink should not be empty.")
+             
         if not targets:
-            self._data["state"] = "hunt"
-            self._data["message"] += " No viable target found; " \
+            self.mode = self.Mode.HUNT
+            self.message += " No viable target found; " \
                 "reverting to hunt mode. "
             targets = board.all_coords(untargeted=True)
-        return targets
-            
-    def placement_for_ship(self, board, ship):
-        """Returns a coordinate and heading that is not touching another ship.
-        """
-        if not isinstance(ship, Ship):
-            ship = Ship(ship)
-        sites = board.all_valid_placements(ship.length,
-                                           distance = 1, 
-                                           diagonal = False)
-        coord, heading = random_choice(sites)
-        return coord, heading
+        
+        self.possible_targets = board.all_coords(untargeted=True)
+        return random_choice(self.possible_targets)
     
-    def update_data(self, outcome):
-        """Updates strategy_data based on the last targeted space and the
-        resulting outcome.
+    def update(self, outcome):
+        """Updates instance state (i.e., attributes) with the results of the
+        input outcome.
         """
         last_target = outcome["coord"]
-        
-        self._data["last_target"] = last_target
+        self.last_target = last_target
         if outcome["sunk_ship_id"]:
-            self._data["state"] = "hunt"
-            self._data["last_hit"] = last_target
-            self._data["current_target_id"] = None
-            self._data["last_sink_id"] = outcome["sunk_ship_id"]
-            self._data["hits_since_last_sink"] = []
+            self.mode = self.Mode.HUNT
+            self.hits_since_last_sink = []
+            self.barrage_count = 0
         elif outcome["hit"]:
-            self._data["state"] = "kill"
-            self._data["last_hit"] = last_target
-            self._data["hits_since_last_sink"] += [last_target]
+            self.mode = self.Mode.KILL
+            self.hits_since_last_sink += [last_target]
+            self.barrage_count = 0
         else:
-            self._data["last_miss"] = last_target
-        self._data["message"] = None
+            if self.barrage:
+                self.barrage_count += 1           
+            
+        self.message = None 
+        
+    def __str__(self):
+        s = (f"Hunter Offense\n  Smart: {self.smart}\n"
+             f"  Hunt method: {self.hunt_method}\n"
+             f"  Current mode: {self.mode}\n")
+        if self.barrage:
+            s += (f"  Barrate shot {self.barrage_count} of "
+                  "{self.barrage}.")
+            
+    ### Properties ###
+    @property
+    def mode(self):
+        return self._mode
+    
+    @mode.setter
+    def mode(self, mode):
+        if mode == self.Mode.HUNT or mode == self.Mode.KILL:
+            self._mode = mode
+        else:
+            raise ValueError("mode must be Mode.HUNT or Mode.KILL.")
+            
+    @property
+    def hits_since_last_sink(self):
+        return self._hits_since_last_sink
+    
+    @hits_since_last_sink.setter
+    def hits_since_last_sink(self, hits):
+        self._hits_since_last_sink = hits
+        
+    @property
+    def message(self):
+        return self._message
+    
+    @message.setter
+    def message(self, message):
+        self._message = message
+        
+    @property
+    def barrage(self):
+        return self._barrage
+    
+    @barrage.setter
+    def barrage(self, n):
+        self._barrage = n
+    
+    @property
+    def barrage_count(self):
+        return self._barrage_count
+    
+    @barrage_count.setter
+    def barrage_count(self, n):
+        self._barrage_count = n
+        
+    ### Methods ###
+    def barrage_targets(self, board, prev_barrage_targets):
+        """Returns a list of potential targets based on the location of targets
+        in the current barrage.
+        """
+        if len(prev_barrage_targets) > 1:
+            t1 = board.coords_around(prev_barrage_targets[-1],
+                                     diagonal = True)
+            t2 = board.coords_around(prev_barrage_targets[-2],
+                                     diagonal = True)
+            targets = [t for t in t1 if t in t2]
+        else:
+            targets = board.coords_around(self.shot_history[-1],
+                                          diagonal = False)  
+        return targets
+    
+    def open_ocean_targets(self, board):
+        """Returns a list of potential targets and relative probabilities
+        based on how 'isolated' each target is. A target is more isolated if
+        it is far from its closest previously targeted coordinate.
+        """
+        untargeted = board.all_coords(untargeted=True)
+        target_rows, target_cols =  \
+            np.where(board.target_grid > TargetValue.UNKNOWN)
+        prob = np.zeros(len(untargeted))
+        for (i,coord) in enumerate(untargeted):
+            dr = target_rows - coord[0]
+            dc = target_cols - coord[1]
+            prob[i] = (np.sqrt(dr**2 + dc**2)).min()
+        
+        prob = prob**2
+        
+        return (untargeted, prob)
+            
+    def hunt_targets(self, board):
+        """Returns a list of potential targets based on the hunt_method and
+        the state of the board.
+        """
+        mid_barrage = (self.barrage > 0 and
+                       self.barrage_count > 0)
+        if mid_barrage:
+            prev_barrage_targets = self.shot_history[-(self.barrage_count):]
+            return self.barrage_targets(board, prev_barrage_targets)
+        if self.hunt_method == "random":
+            targets = board.all_coords(untargeted=True)
+        elif self.hunt_method == "empty":
+            # find coord with max distance to nearest shot
+            targets, prob = self.open_ocean_targets(board)
+            
+        elif self.hunt_method == "grid":
+            # self.grid_spacing = spacing
+            # self.gird_first_target = None
+            # self.grid_direction = np.array((1,1))   # direction of step
+            # self.grid_wrap = None
+            if not self.shot_history:
+                targets = [self.grid_first_target]
+            else:
+                ds = self.grid_direction
+                step = self.grid_spacing * ds
+                t = self.last_target() + step
+                if not on_board(t, board.size):
+                    if self.grid_wrap == "shift":
+                        t = self.last_target() + np.array(ds[1],ds[0])
+                        self.grid_direction = -self.grid_direction
+                    elif self.grid_wrap == "offset":
+                        pass
+                    elif self.grid_wrap == "wrap":
+                        RC = [(r,c) for r in range(board.size) 
+                              for c in range(board.size)]
+                        idx = RC.index(self.last_target())
+                        idx += board.size * ds[0] + ds[1]
+                        if idx > board.size**2:
+                            t = None
+                        else:
+                            t = RC[idx]
+                if t and on_board(t, board.size):
+                    targets = [t]
+                    prob = np.array((1))
+                else:
+                    targets = []
+                    prob = []
+                
+        return targets, prob
+    
+    def heatmap(self):
+        """Returns a 2d array the same size as the board with
+        the relative probability of targeting each coordinate.
+        """
+        pass
+        
+
+#%% Defensive Strategy
+class Defense(metaclass=abc.ABCMeta):    
+    """
+    All Defense instances must implement the following attributes and methods:
+    
+    Abstract Properties/Methods:
+    - fleet_placements
+    
+    Properties
+    - fleet_alignment
+    - edges
+    
+    Other methods
+    - __init__
+    
+    Class methods
+    - from_strs
+    """
+    
+    ### Initializer ###
+    
+    def __init__(self, alignment=None, edges=True):
+        """
+        An instance of a Defense subclass should not actually place ships
+        on the board; that is the role of a Player object.
+        Likewise, an Offense should not fire a shot or update the board,
+        it should just provide targets; the Player instance is the object
+        that actually interacts with the Board object.
+
+        Parameters
+        ----------
+        alignment : str, optional
+            A string indicating whether ships should be aligned along a partiular
+            direction: "Vertical" (same as "North-South" or "N-S"),
+            "Horizontal" (same as "East-West" or "E-W"), or "Any" (same as None).
+            
+            The default is None.
+            
+        edges : bool, optional
+            When True, ships may be placed in the first and last rows and 
+            columns of the board. When False, they may not.
+            The default is True.
+    
+
+        Returns
+        -------
+        None.
+
+        """
+        self.fleet_alignment = alignment
+        self.edges = edges
+        
+    ### Abstract Methods ###
+    
+    @abc.abstractmethod
+    def placement_for_ship(self, board, ship_type):
+        pass
+    
+    ### Properties ###
+    @property
+    def fleet_alignment(self):
+        return self._fleet_alignment
+    
+    @fleet_alignment.setter
+    def fleet_alignment(self, align):
+        if align == None or align.upper() == "ANY":
+            self._fleet_alignment = Align.ANY
+        elif align.upper() in ["VERTICAL", "NS", "N-S", "N/S", 
+                       "NORTH-SOUTH", "NORTH/SOUTH"]:
+            self._fleet_alignment = Align.VERTICAL
+        elif align.upper() in ["HORIZONTAL", "EW", "E-W", "E/W", 
+                       "EAST-WEST", "EAST/WEST"]:
+            self._fleet_alignment = Align.HORIZONTAL
+        else:
+            raise ValueError("Alignment must be 'horizontal' or 'vertical', "
+                             "or equivalent directions (NS, EW, etc.)")
+        
+    @property
+    def edges(self):
+        return self._edges
+    
+    @edges.setter
+    def edges(self, value):
+        self._edges = (value == True)
+        
+    ### Class factory method ###
+    
+    @classmethod
+    def from_strs(cls, method, **kwargs):
+        """
+        Allowable methods are:
+            "random"
+            "cluster[ed]"
+            "isolated"
+        
+        Other parameters can be entered by keyword:
+            align = 'horizontal' or 'vertical' (or 'any', the default)
+            diagonal = True / False (Isolated Strategy only)
+            max_sep = True / False (Isolated Strategy only)
+            
+        """
+        if "alignment" in kwargs:
+            alignment = kwargs["alignment"]
+        else:
+            alignment = None
+            
+        if "diagonal" in kwargs:
+            diagonal = kwargs["diagonal"]
+        else:
+            diagonal = False
+            
+        if "max_sep" in kwargs:
+            max_sep = kwargs["max_sep"]
+        else:
+            max_sep = False
+            
+        if "separation" in kwargs:
+            sep = kwargs["separation"]
+        else:
+            sep = None
+            
+        # Choose defense and pass arguments
+        if re.search("isolate", method, re.IGNORECASE):
+            if re.search("max", method):
+                max_sep = True
+            return IsolatedDefense(alignment=alignment, diagonal=diagonal,
+                                   max_sep=max_sep, separation=sep)
+        
+        elif re.search("cluster", method, re.IGNORECASE):
+            return ClusterDefense(alignment=alignment)
+        elif re.search("random", method, re.IGNORECASE):
+            return RandomDefense()
+        
+    ### Other methods ###
+    def fleet_placements(self, board):
+        """Return a dictionary of placements for each ship type. Each value 
+        contains a tuple with (coordinate, heading) for the respective 
+        ship_type key.
+        """
+        
+        placements = {}
+        newboard = Board(board.size)
+        for ship_type in range(1,len(SHIP_DATA)+1):
+            coord, heading = self.placement_for_ship(newboard, ship_type)
+            count = 0
+            while coord == None and heading == None and count <= MAX_ITER:
+                coord, heading = self.placement_for_ship(newboard, ship_type) 
+            if coord == None or heading == None:
+                raise Exception(f"No valid locations found for "
+                                f"{SHIP_DATA[ShipType(ship_type)]['name']}")                    
+            if not newboard.is_valid_ship_placement(ship_type, coord, heading):
+                raise Exception(f"Cannot place "
+                                f"{SHIP_DATA[ShipType(ship_type)]['name']} "
+                                f"at {coord} with heading {heading}.")
+            placements[ship_type] = {"coord": coord, "heading": heading}
+            newboard.place_ship(ship_type, coord, heading)
+        return placements
+            
+    
+#%% RandomDefense: Concrete Defense subclass
+
+class RandomDefense(Defense):
+    """
+    Abstract Properties/Methods:
+    - fleet_placements
+    
+    Properties
+    - fleet_alignment
+    
+    Other methods
+    - __init__
+    - placement_for_ship
+    """
+    
+    def __init__(self, alignment=None, edges=True):
+        """
+        
+
+        Parameters
+        ----------
+        alignment : str, optional
+            The direction of all ships in the fleet; can by "Any", "Vertical", 
+            or "Horizontal". The default is "Any".
+
+        Returns
+        -------
+        None.
+
+        """
+        super().__init__(alignment, edges)
+        
+    #@abc.abstractmethod
+    def placement_for_ship(self, board, ship_type):
+        """Returns a (coord, heading) tuple for the input ship type. The
+        placement is based on the algorithm for this particular subclass of
+        Defense. In this case, the algorithm favors placements that
+        minimize the sum of distances between all coordinates of the input
+        ship to all coordinates of all other ships already on the board.
+        """
+        ok = False
+        count = 0
+        while not ok:
+            coord = random_choice(board.all_coords(unoccuppied=True))
+            heading = board.random_heading(self.fleet_alignment)
+            ok = (board.is_valid_ship_placement(ship_type, coord, heading) and 
+                  count <= MAX_ITER)
+            if not self.edges:
+                dr,dc = board.relative_coords_for_heading(
+                            heading, SHIP_DATA[ShipType(ship_type)]["length"])
+                rows, cols = dr + coord[0], dc + coord[1]
+                ok = ok and not (np.any(rows < 1) or np.any(cols < 1) or 
+                          np.any(rows >= board.size - 1) or 
+                          np.any(cols >= board.size - 1))
+            count += 1
+        if count >= MAX_ITER:
+            raise Exception("Max iterations encountered when trying to place"
+                            " ship randomly.")
+        return (coord, heading)
+    
+#%% ClusterDefense: Concrete Defense subclass
+    
+class ClusterDefense(Defense):
+    """
+    Abstract Properties/Methods:
+    - fleet_placements
+    
+    Properties
+    - fleet_alignment
+    
+    Other methods
+    - __init__
+    - placement_for_ship
+    """
+    
+    def __init__(self, alignment=None, edges=True):
+        """
+
+        Parameters
+        ----------
+        alignment : str, optional
+            The direction of all ships in the fleet; can by "Any", "Vertical", 
+            or "Horizontal". The default is "Any".
+
+        Returns
+        -------
+        None.
+
+        """
+        super().__init__(alignment, edges)
+        
+    #@abc.abstractmethod
+    def placement_for_ship(self, board, ship_type):
+        """Returns a (coord, heading) tuple for the input ship type. The
+        placement is based on the algorithm for this particular subclass of
+        Defense. In this case, the algorithm favors placements that
+        minimize the sum of distances between all coordinates of the input
+        ship to all coordinates of all other ships already on the board.
+        """
+        new_ship = Ship(ship_type)
+        all_placements = board.all_valid_placements(new_ship.length,
+                                                    alignment = self.fleet_alignment,
+                                                    edges = self.edges)
+        # if self.fleet_alignment == Align.VERTICAL:
+        #     all_placements = [p for p in all_placements if 
+        #                       p[1] == "N" or p[1] == "S"]
+        # elif self.fleet_alignment == Align.HORIZONTAL:
+        #     all_placements = [p for p in all_placements if 
+        #                       p[1] == "E" or p[1] == "W"]
+        prob = np.zeros(len(all_placements))
+        for (i, place) in enumerate(all_placements):
+            if len(board.fleet) == 0:
+                prob[i] = 1.
+            else:
+                ds = board.relative_coords_for_heading(place[1], new_ship.length)
+                rows = place[0][0] + ds[0]
+                cols = place[0][1] + ds[1]
+                d2 = 0
+                for (r,c) in zip(rows, cols):
+                    for other_ship in list(board.fleet.values()):
+                        other_coords = np.array(board.coord_for_ship(other_ship))
+                        delta = other_coords - np.tile((r,c), 
+                                                       (other_coords.shape[0],1))
+                        d2 += np.sum(delta**2)
+                prob[i] = 1 / d2
+                    
+        return random_choice(all_placements, p=prob/np.sum(prob))
+        
+#%% IsolatedDefense: Concrete Defense subclass
+        
+class IsolatedDefense(Defense):
+    """
+    Abstract Properties/Methods:
+    - fleet_placements
+    
+    Properties
+    - fleet_alignment
+    - diagonal
+    - maximize_separation
+    
+    Other methods
+    - __init__
+    - placement_for_ship
+    """
+    
+    ### Initializer ###
+    def __init__(self, alignment=None, edges=True, diagonal=True, max_sep=False,
+                 separation=1, ):
+        """
+        Parameters
+        ----------
+        alignment : str, optional
+            The direction of all ships in the fleet; can by "Any", "Vertical", 
+            or "Horizontal". The default is "Any".
+        diagonal : bool, optional
+            True if ships are allowed to occupy diagonally adjacent coordinates
+            (such as C5 and D6). This parameter is the difference between
+            'Isolated' and 'Very Isolated' strategies; it is True for 'Isolated',
+            and False for 'Very Isolated'. The default is True.
+        max_sep : bool, optional
+            Maximize separation between ships. When True, ships are placed in
+            a way that favors maximal separation between all other ships that
+            have already been placed on the board. This parameter is True for
+            'Max Isolated' mode, and False otherwise. Setting this parameter
+            to True overrides the diagonal parameter. The default is False.
+        separation : int, optional
+            The minimum number of spaces between ships. When diagonal is True,
+            ships can still be diagonally adjacent by 'separation' spaces.
+
+        Returns
+        -------
+        None.
+
+        """
+        super().__init__(alignment, edges)
+        self.diagonal = diagonal
+        self.maximize_separation = max_sep
+        
+    ### Abstract Methods ###
+    
+    #@abc.abstractmethod
+    def placement_for_ship(self, board, ship_type):
+        """Returns a (coord, heading) tuple for the input ship type. The
+        placement is based on the algorithm for this particular subclass of
+        Defense. In this case, the algorithm favors placements that either
+        forbids ships from touching (basic isolated), forbids them from 
+        touching even on diagonal spaces (very isolated), or maximizes the
+        distances between ships (max isolated).
+        In max isolated, the algorithm is more likely to choose placements 
+        where the sum of distances between the placement in question and the
+        placement of all ships already on the board is large.
+        """       
+        new_ship = Ship(ship_type)
+        all_placements = board.all_valid_placements(new_ship.length,
+                                                    distance = 1,
+                                                    diagonal = self.diagonal,
+                                                    alignment = self.fleet_alignment,
+                                                    edges = self.edges)
+        if len(all_placements) == 0:
+            return None,None
+        if self.maximize_separation:
+            prob = np.zeros(len(all_placements))
+            for (i, place) in enumerate(all_placements):
+                ds = board.relative_coords_for_heading(place[1], new_ship.length)
+                rows = place[0][0] + ds[0]
+                cols = place[0][1] + ds[1]
+                d2 = 0
+                for (r,c) in zip(rows, cols):
+                    for other_ship in list(board.fleet.values()):
+                        other_coords = np.array(board.coord_for_ship(other_ship))
+                        delta = other_coords - np.tile((r,c), 
+                                                       (other_coords.shape[0],1))
+                        d2 += np.sum(delta**2)
+                prob[i] = d2
+            if np.all(prob == 0):
+                prob = np.ones(prob.shape)
+            
+            return random_choice(all_placements, p=prob/np.sum(prob))
+        
+        else:
+            return random_choice(all_placements)
+    
+    ### Properties ###
+    
+    @property
+    def diagonal(self):
+        """Diagonal is True if ships are allowed to touch on diagonally-
+        connected spaces (for example, A1 and B2), and False otherwise.
+        """
+        return self._diagonal
+    
+    @diagonal.setter
+    def diagonal(self, value):
+        # Force _diagonal to be True or False
+        self._diagonal = (value == True)
+        
+    @property
+    def maximize_separation(self):
+        return self._maximize_separation
+    
+    @maximize_separation.setter
+    def maximize_separation(self, value):
+        # Force _maximize_separation to be True or False
+        self._maximize_separation = (value == True)    
         
 #%%
 class Board:
@@ -1035,7 +1965,7 @@ class Board:
     def ship_at_coord(self, coord):
         """Returns the Ship object placed at the input coordinate.
         If no ship is present at the input space, returns None.
-        """
+        """        
         ship_id = self.ocean_grid[coord[0],coord[1]]
         if ship_id == 0:
             return None
@@ -1053,34 +1983,66 @@ class Board:
         return ship.damage[coords.index(coord)]
     
     # Ship placement functions        
-    def all_valid_placements(self, length, distance=0, diagonal=False):
+    def all_valid_placements(self, length, distance=0, diagonal=True,
+                             edges=True, alignment=Align.ANY):
         """Returns a list of all possible placements (consisting of row, 
-        column, and heading) on the board. The distance parameter controls
-        how close the placements can be to another existing ship.
+        column, and heading) on the board. The distance parameter is the 
+        minimum separation between ships.
+        If the diagonal input is True, the four coordinates 
+        diagonally touching existing ships are considered valid (and invalid
+        if diagonal is False).
         The returned list of placements is in the form of a list of tuples
         ((row, column), heading).
         """
         headings = {"N": (1,0), "S": (-1,0), "E": (0,-1), "W": (0,1)}
+        
+        if alignment == Align.VERTICAL:
+            allowed_headings = ["N", "S"]
+        elif alignment == Align.HORIZONTAL:
+            allowed_headings = ["E", "W"]
+        else:
+            allowed_headings = ["N","S","E","W"]
+        # Determine whether edge coordinates can be occuppied
+        rcmin = 1 - edges
+        rcmax = self.size - (1 - edges) - 1
+        
         unoccuppied = self.all_coords(unoccuppied=True)
         placements = []
         for unocc in unoccuppied:
-            for h in ["N","S","E","W"]:
+            for h in allowed_headings:
                 ds = np.vstack(([0,0], np.cumsum(np.tile(
                     headings[h], (length-1,1)), axis=0)))
                 rows,cols = unocc[0] + ds[:,0], unocc[1] + ds[:,1]
                 ok = True
-                if (np.any(rows < 0) or np.any(rows >= self.size) or 
-                    np.any(cols < 0) or np.any(cols >= self.size) or
+                if (np.any(rows < rcmin) or np.any(rows > rcmax) or 
+                    np.any(cols < rcmin) or np.any(cols > rcmax) or
                     np.any(self.ocean_grid[rows,cols])):
                         ok = False
                 if distance > 0 and ok:
+                    dmin = self.size
                     for (r,c) in zip(rows, cols):
-                        surrounding = zip(*self.coords_around((r,c), diagonal))
-                        if np.any(self.ocean_grid[tuple(surrounding)]):
-                            ok = False
+                        for other_ship in list(self.fleet.values()):
+                            other_coords = np.array(self.coord_for_ship(other_ship))
+                            delta = other_coords - np.tile((r,c), 
+                                                           (other_coords.shape[0],1))
+                            d = np.sqrt(np.sum(delta**2, axis=1))
+                            dmin = np.min((np.min(d), dmin))
+                    if diagonal:
+                        dmin = np.ceil(dmin)
+                    else:
+                        dmin = np.floor(dmin)
+                    ok = (dmin > distance)
                 if ok:
                     placements += [(unocc, h)]
         return placements
+    
+    def place_fleet(self, placements):
+        """Places all ships according to the data in the input dictionary,
+        which has the following format:
+        """
+        for (k,place) in placements.items():
+            self.place_ship(k, place["coord"], place["heading"])
+            
     def place_ship(self, ship_desc, coord, heading):
         """Places a ship corresponding to the input ship_desc (which may be an
         integer 1-5 or a string like "Patrol", "Carrier", etc.)
@@ -1098,7 +2060,7 @@ class Board:
             
         ship = Ship(ship_id)
         if not self.is_valid_ship_placement(ship_id, coord, heading):
-            print(f"Cannot place {ship.name} at {coord}.")
+            raise Exception(f"Cannot place {ship.name} at {coord}.")
             return False
         else:
             self.fleet[ShipType(ship_id)] = ship
@@ -1139,8 +2101,8 @@ class Board:
             for ship in self.fleet.values():
                 if np.any(ship.damage > 0):
                     return False
-            ship_ids = [ship.ship_id.value for ship in self.fleet.values()]
-            if sorted(ship_ids) != list(range(1, len(SHIP_DATA.keys())+1)):
+            ship_ids = [ship.ship_id for ship in self.fleet.values()]
+            if sorted(ship_ids) != list(range(1, len(SHIP_DATA)+1)):
                 return False
             return True
         
@@ -1169,9 +2131,23 @@ class Board:
                    if (i,j) not in exclude]
         return indices[np.random.choice(range(len(indices)))]
     
-    def random_heading(self):
+    def random_heading(self, alignment=None):
         """Returns a random heading: N/S/E/W."""
-        return(np.random.choice(['N','S','E','W']))
+        if alignment == None or alignment == Align.ANY:
+            return(np.random.choice(['N','S','E','W']))
+        
+        if isinstance(alignment, str):
+            alignment = alignment.upper()
+            for a in ["NORTH","SOUTH","EAST","WEST"]:
+                alignment = alignment.replace(a, a[0])
+                for a in ["/", "-", "|"]:
+                    alignment = alignment.replace(a, "")
+        if (alignment == "NS" or alignment == "SN" or alignment == "UD" or 
+            alignment == "DU" or alignment == Align.VERTICAL):
+            return(np.random.choice(['N','S']))
+        elif (alignment == "EW" or alignment == "WE" or alignment == "LR" or 
+              alignment == "RL" or Align.HORIZONTAL):
+            return(np.random.choice(['E','W']))
     
     # Combat functions
     def update_target_grid(self, target_coord, hit, ship_id):
@@ -1331,11 +2307,20 @@ class Board:
                   + "\033[0;0m\n")
         return s
     
-    def show(self):
+    def show(self, grid="both"):
         """Shows images of the target map and grid on a figure with two 
         subaxes. Colors the images according to hit/miss (for target map) and
         damage (for the grid). Returns the figure containing the images.
         """
+        if grid.lower() == "both":
+            grid = ["target", "ocean"]
+        else:
+            grid = [grid.lower()]
+        if (grid[0] not in ["target", "ocean"] or 
+                grid[-1] not in ["target", "ocean"]):
+            raise ValueError("grid must be 'target', 'ocean', "
+                             "or 'both' (default).")
+            
         label_color = "lightgray"
         grid_color = "gray"
         axis_color = "lightgray"
@@ -1353,11 +2338,15 @@ class Board:
         cmap_flat = mpl.colors.ListedColormap([ocean_color, ship_color, ship_color])
         cmap_vert = mpl.colors.ListedColormap([ocean_color, miss_color, hit_color])
 
-        fig, axs = plt.subplots(2, 1, figsize = (10,6))
+        if len(grid) == 2:
+            fig, axs = plt.subplots(2, 1, figsize = (10,6))
+        else:
+            fig, axs = plt.subplots(1, 1, figsize = (6,6))
+            axs = np.array([axs])
 
         flat_grid = self.ocean_grid_image()
         vert_grid = self.target_grid_image()
-
+        
         # grid lines
         grid_extent = [1-0.5, self.size+0.5, self.size+0.5, 1-0.5]
         for ax in axs:
@@ -1383,45 +2372,47 @@ class Board:
             ax.tick_params(color = 'lightgray')
             ax.tick_params(which='minor', length=0)
 
-        axs[0].imshow(np.zeros(vert_grid.shape), cmap=cmap_vert, 
-                      extent=grid_extent)
-        axs[1].imshow(flat_grid, cmap=cmap_flat, extent=grid_extent)
-
-        # add pegs
-        rows,cols = np.where(flat_grid == 2)
-        red_pegs = [plt.Circle((x,y), radius=peg_radius, 
-                               facecolor = hit_color, 
-                               edgecolor = peg_outline_color) 
-                    for (x,y) in zip(cols+1,rows+1)]
-        for peg in red_pegs:
-            axs[1].add_patch(peg)
-            
-        # vertical grid
-        rows,cols = np.where(vert_grid == TargetValue.MISS)
-        white_pegs = [plt.Circle((x,y), radius=peg_radius, 
-                                 facecolor = miss_color, 
-                                 edgecolor = peg_outline_color) 
-                    for (x,y) in zip(cols+1,rows+1)]
-        for peg in white_pegs:
-            axs[0].add_patch(peg) 
-        rows,cols = np.where(vert_grid >= TargetValue.HIT)
-        red_pegs = [plt.Circle((x,y), radius=peg_radius, 
-                               facecolor = hit_color, 
-                               edgecolor = peg_outline_color) 
-                    for (x,y) in zip(cols+1,rows+1)]
-        for peg in red_pegs:
-            axs[0].add_patch(peg) 
-        
-        # ships
-        ship_boxes = self.ship_rects()
-        for shipId in ship_boxes:
-            box = ship_boxes[shipId]
-            axs[1].add_patch( 
-                mpl.patches.Rectangle((box[0], box[1]), box[2], box[3], \
-                                      edgecolor = ship_outline_color,
-                                      fill = False,                                       
-                                      linewidth = 2))
-            axs[1].text(box[0]+0.12, box[1]+0.65, SHIP_DATA[shipId]["name"][0])
+        if "target" in grid:
+            axs[0].imshow(np.zeros(vert_grid.shape), cmap=cmap_vert, 
+                                 extent=grid_extent)
+            # add pegs to target grid
+            rows,cols = np.where(vert_grid == TargetValue.MISS)
+            white_pegs = [plt.Circle((x,y), radius=peg_radius, 
+                                     facecolor = miss_color, 
+                                     edgecolor = peg_outline_color) 
+                        for (x,y) in zip(cols+1,rows+1)]
+            for peg in white_pegs:
+                axs[0].add_patch(peg) 
+            rows,cols = np.where(vert_grid >= TargetValue.HIT)
+            red_pegs = [plt.Circle((x,y), radius=peg_radius, 
+                                   facecolor = hit_color, 
+                                   edgecolor = peg_outline_color) 
+                        for (x,y) in zip(cols+1,rows+1)]
+            for peg in red_pegs:
+                axs[0].add_patch(peg) 
+                
+        if "ocean" in grid:
+            axs[-1].imshow(np.zeros(flat_grid.shape), cmap=cmap_flat, 
+                           extent=grid_extent)
+            # add pegs to ships
+            rows,cols = np.where(flat_grid == 2)
+            red_pegs = [plt.Circle((x,y), radius=peg_radius, 
+                                   facecolor = hit_color, 
+                                   edgecolor = peg_outline_color) 
+                        for (x,y) in zip(cols+1,rows+1)]
+            for peg in red_pegs:
+                axs[-1].add_patch(peg)
+            # ships
+            ship_boxes = self.ship_rects()
+            for shipId in ship_boxes:
+                box = ship_boxes[shipId]
+                axs[-1].add_patch( 
+                    mpl.patches.Rectangle((box[0], box[1]), box[2], box[3], \
+                                          edgecolor = ship_outline_color,
+                                          fill = False,                                       
+                                          linewidth = 2))
+                axs[-1].text(box[0]+0.12, box[1]+0.65, 
+                             SHIP_DATA[shipId]["name"][0])
 
         fig.set_facecolor(bg_color)
         return fig
@@ -1468,7 +2459,7 @@ class Ship:
         """Returns a string listing the Ship instance name, length, damage,
         and whether the ship is sunk.
         """
-        s = (f"{self.name} (id = {self._ship_id.value}) - {self.length} slots, " 
+        s = (f"{self.name} (id = {self._ship_id}) - {self.length} slots, " 
              f"damage: {str(self.damage)}")
         if self.sunk():
             s += " (SUNK)"
