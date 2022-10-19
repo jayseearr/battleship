@@ -46,24 +46,57 @@ class Align(Enum):
     
 #%% Data
 
-SHIP_DATA = {ShipType.PATROL: {"name": "Patrol".title(), "length": 2},
-             ShipType.DESTROYER: {"name": "Destroyer".title(), "length": 3},
-             ShipType.SUBMARINE: {"name": "Submarine".title(), "length": 3},
-             ShipType.BATTLESHIP: {"name": "Battleship".title(), "length": 4},
-             ShipType.CARRIER: {"name": "Carrier".title(), "length": 5}
-             }
+# Ship.data = {ShipType.PATROL: {"name": "Patrol".title(), "length": 2},
+#              ShipType.DESTROYER: {"name": "Destroyer".title(), "length": 3},
+#              ShipType.SUBMARINE: {"name": "Submarine".title(), "length": 3},
+#              ShipType.BATTLESHIP: {"name": "Battleship".title(), "length": 4},
+#              ShipType.CARRIER: {"name": "Carrier".title(), "length": 5}
+#              }
 
 #%% Utility Functions
 
 def random_choice(x, p=None):
-    """Returns a single randomly sampled element from the input list, tuple,
-    or array."""
+    """
+    Returns a single element from the input array (x) randomly sampled with
+    probability distribution p.
+
+    Parameters
+    ----------
+    x : list or numpy array
+        The items from which to sample.
+    p : numpy array, optional
+        An array with the same length as x. The probability of picking x[i]
+        is given by p[i]. p should be normalized so that sum(p) == 1.
+        The default is None, which samples from a uniform probability 
+        distribution.
+
+    Returns
+    -------
+        A single element from x. If x has length 1, the sole element is 
+        returned. If x is empty, an empty numpy array is returned.
+
+    """
     return x[np.random.choice(range(len(x)), p=p)]
 
-def on_board(x, size):
-    """Returns True if x is a coordinate on a board with input size.
-    Practically, occurs when x is a coordinate or tuple with both elements
-    between 0 and size - 1.
+def is_on_board(x, size):
+    """
+    Returns True if the input coordinate is on the board with specified size,
+    and False otherwise. This is true when the row and column contained in 
+    x are between 0 and size - 1.
+
+    Parameters
+    ----------
+    x : Coord or tuple
+        A tuple with two elements specifying row and column of the coordinate,
+        or a Coord instance.
+    size : int
+        The number of coordinates along one dimension of a Board.
+
+    Returns
+    -------
+    Bool
+        True if x is on the board, False otherwise.
+
     """
     x = tuple(x)    # convert from Coord or list
     return (x[0] >= 0 and x[0] < size and x[1] >= 0 and x[1] < size)
@@ -188,6 +221,47 @@ class Coord:
     __TOLERANCE__ = 1e-6
     
     def __init__(self, a, b=None):
+        """
+        A representation of a single space on the Battleship board. 
+        A coord instance may be represented as row and column indices, or as
+        a string with a letter and a number.
+
+        A Coord may be initialized in any of the following formats:
+        Row/Col format:
+            Coord(row,col)      Row and col are integers between 0 and the
+                                size of the board minus 1.
+        Tuple format:
+            Coord((row,col))    The tuple (row,col) is passed as a single 
+                                parameter. Row and col are again integers.
+        String format:
+            Coord("X#")         X is a letter between A and the letter 
+                                corresponding to the board size (typically J,
+                                for a 10 x 10 board), and # is an integer 
+                                between 1 and the board size (typically 10).
+        Parameters
+        ----------
+        a : str or tuple or int
+            See input formats, above.
+        b : int, optional
+            The column index. Only used in Row/Col input format, described 
+            above. The default is None.
+
+        Raises
+        ------
+        ValueError
+            DESCRIPTION.
+        TypeError
+            When the inputs are not str, tuple, or int.
+
+        Returns
+        -------
+        An instance of a Coord object. Important properties are:
+            rowcol      A two-element tuple that gives the row a column of 
+                        the Coord.
+            lbl         The string representation of the row and column 
+                        (e.g., "C6").
+
+        """
         if b is not None:
             r = a
             c = b
@@ -546,7 +620,7 @@ class Game:
         else:
             hit_or_miss = "Miss."
         if outcome["sunk_ship_id"]:
-            sink = SHIP_DATA[outcome["sunk_ship_id"]]["name"] + " sunk!"
+            sink = Ship.data[outcome["sunk_ship_id"]]["name"] + " sunk!"
         print(f"Turn {len(player.shot_history)}: Player {name} fired a shot at "
               f"{Coord(target)}...{hit_or_miss} {sink}")
         
@@ -560,10 +634,10 @@ class Game:
             print(f"Player {self.winner.name} wins.")
             print(f"  Player {self.winner.name} took "
                   f"{len(self.winner.shot_history)} shots, and sank " 
-                  f"{sum(1 - self.loser.board.afloat_ships())} ships.")
+                  f"{sum(1 - self.loser.board.is_fleet_afloat())} ships.")
             print(f"  Player {self.loser.name} took " 
                   f"{len(self.loser.shot_history)} shots, and sank " 
-                  f"{sum(1 - self.winner.board.afloat_ships())} ships.")
+                  f"{sum(1 - self.winner.board.is_fleet_afloat())} ships.")
             print(f"Game length: {self.turn_count} turns.")
             print(f"(Game ID: {self.game_id})")
             print("")
@@ -572,15 +646,16 @@ class Game:
             print("GAME TERMINATED - NO WINNER.")
             print(f"  Player {self.player1.name} (player 1) took " 
                   f"{len(self.player1.shot_history)} shots, and sank "
-                  f"{sum(1 - self.player2.board.afloat_ships())} ships.")
+                  f"{sum(1 - self.player2.board.is_fleet_afloat())} ships.")
             print(f"  Player {self.player2.name} (player 2) took " 
                   f"{len(self.player2.shot_history)} shots, and sank "
-                  f"{sum(1 - self.player1.board.afloat_ships())} ships.")
+                  f"{sum(1 - self.player1.board.is_fleet_afloat())} ships.")
             print(f"Game length: {self.turn_count} turns.")
             print(f"(Game ID: {self.game_id})")
             print("")
             
     # Factory method
+    
     @classmethod
     def random(cls, seed=None, game_id=None, verbose=True, show=False):
         from player import AIPlayer
@@ -601,17 +676,29 @@ class Game:
         
 #%% Board Class
 class Board:
-    """An instance of a Battleship game board. Each board has a fleet of 5 
-    ships, a 10 x 10 ocean grid upon which ships are arranged, and a 10 x 10 
-    target grid where hit/miss indicators are placed to keep track of 
-    opponent ships.
-    """
 
     def __init__(self, size=10):
-        self.size = size
-        self.fleet = {}
-        self.ocean_grid = np.zeros((size, size), dtype=np.int8)      
-        self.target_grid = np.ones((size, size)) * TargetValue.UNKNOWN
+        """
+        Creates an instance of a Battleship game Board. The board has a 
+        fleet of 5 ships, an ocean grid upon which ships are arranged,
+        and a target grid where hits/misses on opponent ships are tracked.
+
+        Parameters
+        ----------
+        size : int, optional
+            The number of spaces along each dimension of the board.
+            The default is 10.
+
+        Returns
+        -------
+        Board instance.
+
+        """
+        self._size = size
+        self._fleet = {}
+        self._ship_placements = {}
+        self._ocean_grid = np.zeros((size, size), dtype=np.int8)      
+        self._target_grid = np.ones((size, size)) * TargetValue.UNKNOWN
         
     def __str__(self):
         """Returns a string that uses text to represent the target map
@@ -648,6 +735,8 @@ class Board:
     def __repr__(self):
         return f"Board({self.size})"
     
+    # Re-initalization
+    
     def reset(self):
         """Removes all ships and pegs from the board."""
         board = Board(self.size)
@@ -655,7 +744,7 @@ class Board:
         self.target_grid = board.target_grid
         self.ocean_grid = board.ocean_grid
         
-    # Factory method
+    # Factory methods
     
     @classmethod
     def copy(cls, other_board):
@@ -670,76 +759,159 @@ class Board:
         board.target_grid = other_board.target_grid.copy()
         return board
     
-    # Coordinate functions        
-    def all_coords(self, untargeted=False, unoccuppied=False,
-                   targeted=False, occuppied=False):
-        """Returns a list of all coordinates on the board.
-        If untargeted is True, only coords that have not been targeted are 
-        returned. If unoccuppied is True, only coords with no ships on the
-        board's ocean grid are returned."""
-        if np.sum((untargeted, unoccuppied, targeted, occuppied)) > 1:
-            raise ValueError("Only one of the (un)occuppied or (un)targeted" \
-                             " inputs can be set to True.")
-        indices = None
-        exclude = []
-        if untargeted:
-            xr,xc = np.where(self.target_grid != TargetValue.UNKNOWN)
-            exclude = list(zip(xr, xc))
-        elif unoccuppied:
-            xr,xc = np.where(self.ocean_grid != 0)
-            exclude = list(zip(xr, xc))
-        elif targeted:
-            r,c = np.where(self.target_grid != TargetValue.UNKNOWN)
-            indices = list(zip(r,c))
-        elif occuppied:
-            r,c = np.where(self.ocean_grid != 0)
-            indices = list(zip(r,c))
+    @classmethod
+    def outcome(cls, coord, hit, sunk=False, sunk_ship_id=None):
+        """
+        Returns an outcome dictionary for the input shot information.
 
-        if indices == None:
-            indices = [(r,c) for r in range(self.size) 
-                       for c in range(self.size) 
-                       if (r,c) not in exclude]
-        return indices
-        #return [Coord(rc) for rc in indices]
-    
-    def unoccuppied_coords(self):
-        """Returns the row/column for all coordinates that are not occuppied by
-        a ship."""
-        return self.all_coords(unoccuppied=True)
+        Parameters
+        ----------
+        coord : 
+            Two-element tuple indicating the (row,column) of the shot.
+        hit : Bool
+            True if a ship was hit at coord.
+        sunk : Bool
+            True if a ship was sunk.
+        sunk_ship_id : Bool, optional
+            The ShipType value (int 1-5) of the ship that was sunk.
+            The default is None, which means no ship sunk.
 
-    def occuppied_coords(self):
-        """Returns the indices of all ship-occuppied coordinates on the board 
-        (regardless of damage/sunk status).
+        Returns
+        -------
+        outcome : dict
+            A dictionary with the following key/value pairs:
+                'coord': (row,col) tuple of the shot location
+                'hit': Bool; True if shot was a hit
+                'sunk' : Bool; True if ship was sunk
+                'sunk_ship_id' : ShipType enum (or int 1-5) indicating 
+                                 the type of ship sunk (if one was sunk).
+
         """
-        return self.all_coords(occuppied=True)
-    
-    def targeted_coords(self):
-        """Returns the indices of all previously targeted indices on the target
-        grid (i.e., the location of all pegs, white or red).
+        if sunk_ship_id is not None:
+            if not sunk:
+                raise ValueError("'sunk' must be True when "
+                                 "'sunk_ship_id' is not None.")
+        if sunk and not hit:
+            raise ValueError("'hit' must be True when 'sunk' is True.")
+        return {'coord': coord, 
+                'hit': hit,
+                'sunk': sunk,
+                'sunk_ship_id': sunk_ship_id}
+        
+    @classmethod
+    def test(cls,targets=True):
         """
-        return self.all_coords(targeted=True)
-    
-    def untargeted_coords(self):
-        """Returns the indices of all non targeted indices on the target
-        grid (i.e., the locations with no pegs).
+        Returns a test board with ships at arbitrary (consistent) locations.
+
+        Parameters
+        ----------
+        targets : Bool, optional
+            Adds some arbitrary targets and outcomes on the target board,
+            as well as hits to the fleet if True. The default is True.
+
+        Returns
+        -------
+        board : instance of Board.
+
         """
-        return self.all_coords(untargeted=True)
-    
-    def relative_coords_for_heading(self, heading, length=1):
-        """Returns row and column arrays with displacements corresponding to
-        a ship facing the input heading and with input length. The first slot 
-        on the ship will be at relative position (0,0), the second at (-1,0) 
-        for north heading, (0,-1) for east, (1,0) for south, and (0,1) for
-        west. The third and subsequent positions will be at 2x this vector,
-        3x, etc.
-        Useful for determining which rows/cols a ship will occupy based on
-        a certain heading.
-        """
-        if (heading.upper() in ["NORTH", "SOUTH", "EAST", "WEST"] or
-                heading.upper() in ["UP", "DOWN", "LEFT", "RIGHT"] or
-                heading.upper() in ["VERTICAL", "HORIZONTAL"]):
-            heading = heading[0].upper()
+        board = cls(10)
+        board.add_ship(1, Coord("J9"), "R") 
+        board.add_ship(2, Coord("E8"), "N") 
+        board.add_ship(4, Coord("G2"), "W") 
+        board.add_ship(3, Coord("B6"), "W") 
+        board.add_ship(5, Coord("A5"), "N")
+        
+        if targets:
+            board.update_target_grid(Board.outcome((0,4), True))
+            board.update_target_grid(Board.outcome((0,3), True))
+            board.update_target_grid(Board.outcome((0,5), True, True, ShipType(3)))
+            board.update_target_grid(Board.outcome((2,8), False))
+            board.update_target_grid(Board.outcome((9,7), False))
+            board.update_target_grid(Board.outcome((6,7), False))
+            board.update_target_grid(Board.outcome((4,4), False))
+            board.update_target_grid(Board.outcome((3,2), False))
+            board.update_target_grid(Board.outcome((1,6), False))
             
+            board.fleet[ShipType(2)].hit(0)
+            board.fleet[ShipType(2)].hit(1)
+            board.fleet[ShipType(2)].hit(2)
+            board.fleet[ShipType(4)].hit(3)
+            board.fleet[ShipType(5)].hit(2)
+        
+        return board
+
+    # Properties
+    
+    @property
+    def size(self):
+        return self._size
+    
+    @property
+    def ocean_grid(self):
+        return self._ocean_grid
+
+    @property
+    def target_grid(self):
+        return self._target_grid
+    
+    @property
+    def fleet(self):
+        return self._fleet
+    
+    @property
+    def ship_placements(self):
+        return self._ship_placements
+    
+    # General Coordinate Methods
+    
+    def rel_coords_for_heading(self, heading, length):
+        """
+        Returns arrays containing the row and column indices that, when
+        added to an arbitrary coordinate, equal the coordinates that would be
+        occuppied by a ship with the input heading and length placed at 
+        that coordinate. 
+        
+        For example, heading = "N" and length = 3 will return 
+        ([0,1,2], [0,0,0]). If a ship is placed at a coordinate (R,C) with 
+        these relative coordinates and with a heading of North and length 3, 
+        the ship will occupy coordinates (R,C), (R+1,C), and (R+2,C).
+        
+        rel_coords_for_heading("E", 4) returns ([0,0,0,0], [0,-1,-2,-3]),
+        so placing this ship at (R,C) means it needs to span coordinates
+        (R,C), (R,C-1), (R,C-2), and (R,C-3).
+        
+        The returned row/column arrays will always both begin at 0. One of
+        them will be all zeros (depending on whether heading is N/S or E/W), 
+        and the other one will be range(0,length).
+        Since the returned
+
+        Parameters
+        ----------
+        heading : str
+            A string describing the desired heading of the ship. This can be
+            a cardinal direction or single-letter abbreviation ("North" or 
+            "N"), or Up/Down/Left/Right, or Vertical/Horizontal. By convention,
+            Vertical is the same as North and Horizontal is the same as West;
+            i.e., vertical and horizontal headings default toward the origin 
+            of the board.
+            
+        length : int
+            The length of a ship.
+
+        Raises
+        ------
+        ValueError
+            Occurs when an invalid heading string is used.
+
+        Returns
+        -------
+        Tuple of two numpy arrays (each with length equal to length parameter)
+            out[0] is the array of row values and out[1] is the array of
+            column values that should be added to an arbitrary coordinate 
+            to get all coordinates for a ship.
+
+        """
+        heading = heading[0].upper()
         if heading == "N" or heading == "D" or heading == "V":
             ds = (1,0)
         elif heading == "S" or heading == "U":
@@ -758,20 +930,22 @@ class Board:
             ds = np.vstack(([0,0], 
                             np.cumsum(np.tile(ds, (length-1,1)), axis=0)))
             return (ds[:,0], ds[:,1])
-       
+        
     def coords_for_placement(self, placement, length):
         """
-        
+        Returns the coordinates that correspond to the input placement
+        (coordinate, heading) and ship length.
 
         Parameters
         ----------
-        placement : tuple 
-            First element of tuple is a coordinate (a tuple with two elements
-            corresponding to a row and a column) and the second is a chr 
-            denoting a heading ("N", "S", "E", or "W").
+        placement : dict 
+            placement['coord']: A coordinate (a tuple with two elements
+            corresponding to a row and a column) 
+            placement['heading']: A string denoting a heading 
+            ("N", "S", "E", or "W").
         length : int
             The length of a ship placed at the input coordinate facing the
-            input heading,
+            input heading.
             The output will have a number of elements equal to length.
 
         Returns
@@ -780,11 +954,12 @@ class Board:
         and the length.
 
         """
-        coord, heading = placement
-        ds = self.relative_coords_for_heading(heading, length)
+        coord = placement['coord']
+        heading = placement['heading']
+        ds = self.rel_coords_for_heading(heading, length)
         return list(zip(coord[0] + ds[0], coord[1] + ds[1]))
-        
-    def valid_coord(self, coords):
+    
+    def is_valid_coord(self, coords):
         """
         Checks if the input coordinates are valid or not. Returns an array
         of bools with length equal to the input list of coordinates.
@@ -805,22 +980,293 @@ class Board:
         rows, cols = zip(*coords)
         rows = np.array(rows)
         cols = np.array(cols)
-        return np.array((rows >= 0) * (rows < self.size) * (cols > 0) *
+        return np.array((rows >= 0) * (rows < self.size) * (cols >= 0) *
                          (cols < self.size))
     
-    def coords_around(self, coord, diagonal=False, 
-                     untargeted=False, unoccuppied=False):
-        """Returns all coordinates that surrounds the input coordinate.
-        By default, the random coordinate will be touching the input coordinate
-        (so input C5 could result in one of B5, C4, C6, or D5). If
-        diagonal is True, the 4 spaces that touch the input coordinate diagaonally
-        (the ones NW, NE, SW, SE of the target) are also possible.
-        If untargeted is True, then only untargeted coordinates will be chosen.
+    @classmethod
+    def coords_to_coords_distances(cls, coords1, coords2):
         """
+        Returns a 2d array containing the distances between all pairs of 
+        coordinates in the two input arrays.
+        
+        Parameters
+        ----------
+        coords1 : list
+            A list of (row,col) tuples.
+        coords2 : list
+            A list of (row,col) tuples.
+        
+        Returns
+        -------
+        distances : numpy array (2d).
+            distances[i,j] is the distance between coords1[i] and coords2[j]
+
+        """
+        if isinstance(coords1, list):
+            coords1 = np.array(coords1)
+        if isinstance(coords2, list):
+            coords2 = np.array(coords2)
+        n2 = coords2.shape[0]
+        distances = np.zeros((coords1.shape[0], coords2.shape[0]))
+        for row in range(coords1.shape[0]):
+            coord1 = np.tile(coords1[row,:], (n2,1))
+            distances[row,:] = np.sqrt(np.sum((coord1 - coords2)**2, axis=1))
+        return distances
+    
+    # Random Coordinates
+    
+    def random_coord(self, unoccuppied=False, untargeted=False):
+        """
+        Returns a randomly selected coordinate from the board.
+        If the unoccuppied parameter is True, the coordinate will chosen
+        from the spaces on the ocean grid that do not contain ships.
+        If the untargeted parameter is True, the coordinate will be chosen
+        from the spaces on the target grid that do not have hits or misses.
+
+        Parameters
+        ----------
+        unoccuppied : Bool, optional
+            If True, only coordinates on the ocean grid with no ships will 
+            be sampled. The default is False.
+        untargeted : TYPE, optional
+            If True, only coordinates on the target grid that have not been
+            fired at will be sampled. The default is False.
+
+        Raises
+        ------
+        ValueError
+            DESCRIPTION.
+
+        Returns
+        -------
+        Tuple
+            Contains the (row,col) of a randomly selected coordinate that
+            is consisted with the untargeted/unoccuppied parameters.
+
+        """
+        if unoccuppied and untargeted:
+            raise ValueError("Inputs unoccuppied and untargeted cannot both \
+                             be true.")
         if unoccuppied:
             exclude = self.all_coords(occuppied=True)
+        elif untargeted:
+            exclude = self.all_targets(targeted=True)
+        else:
+            exclude = []
+        indices = [(i,j) for i in range(self.size) 
+                   for j in range(self.size) 
+                   if (i,j) not in exclude]
+        return indices[np.random.choice(range(len(indices)))]
+    
+    def random_heading(self, alignment=None):
+        """
+        Returns a randomly selected heading from "N", "S", "E", or "W".
+        The alignment parameter may be used to restrict the possible heading
+        values.
+
+        Parameters
+        ----------
+        alignment : str or Align (Enum), optional
+            A string or Align value that constrains the allowable headings. 
+            Possible values and their effect on the random selection are:
+                - None or "Any" or Align.ANY
+                    Any of the four directions are possible.
+                - "NS", "N/S", "N|S" or Align.VERTICAL:
+                    "N" and "S" are the possible values.
+                - "EW", "E/W", "E|W" or Align.HORIZONTAL:
+                    "E" and "W" are the possible values.
+                - "NW" or "standard":
+                    "N" and "W" are the possible values. This is useful for
+                    enumerating over all possible placements on a board,
+                    since it will not double count equivalent placements that
+                    face opposite directions but have matching coordinates.
+            The default is None.
+
+        Returns
+        -------
+        str : N", "S", "E", or "W"
+
+        """
+        if (alignment == None or 
+                alignment.lower() == "any" or 
+                alignment == Align.ANY):
+            return(np.random.choice(['N','S','E','W']))
+        if (alignment == "NW" or alignment.lower() == "standard"):
+            return(np.random.choice(["N", "W"]))
+        if isinstance(alignment, str):
+            alignment = alignment.upper()
+            for a in ["NORTH","SOUTH","EAST","WEST"]:
+                alignment = alignment.replace(a, a[0])
+                for a in ["/", "-", "|"]:
+                    alignment = alignment.replace(a, "")
+        if (alignment == "NS" or alignment == "SN" or alignment == "UD" or 
+            alignment == "DU" or alignment == Align.VERTICAL):
+            return(np.random.choice(['N','S']))
+        elif (alignment == "EW" or alignment == "WE" or alignment == "LR" or 
+              alignment == "RL" or Align.HORIZONTAL):
+            return(np.random.choice(['E','W']))
+        
+    # Target Grid Methods
+    
+    def all_targets(self, untargeted=False, targeted=False):
+        """
+        Returns a list of all coordinates (row/column indices)on the target 
+        grid. Returns only previously targeted or untargeted coordinates
+        if either the 'targeted' or 'untargeted' parameters are set to True.
+        Only one of these parameters may be True at a time.
+
+        Parameters
+        ----------
+        untargeted : Bool, optional
+            When True, only untargeted coordinates are returned.
+            The default is False.
+        targeted : Bool, optional
+            When True, only previously targeted coordinates are returned.
+            DESCRIPTION. The default is False. Targeted and untargeted
+            cannot both be True.
+
+        Returns
+        -------
+        List of tuples.
+            A list of 2-element tuples, each of which corresponds to the row/
+            column indices of a coordinate on the target grid that is 
+            untargeted or targeted, as set by the corresponding input 
+            parameters.
+
+        """
+        if untargeted and targeted:
+            raise ValueError("Only one of 'untargeted' and 'targeted' may"
+                             " be True.")
+        exclude = []
         if untargeted:
-            exclude = self.all_coords(targeted=True)
+            xr,xc = np.where(self.target_grid != TargetValue.UNKNOWN)
+            exclude = list(zip(xr, xc))
+        elif targeted:
+            r,c = np.where(self.target_grid != TargetValue.UNKNOWN)
+            indices = list(zip(r,c))
+        if exclude:
+            indices = [(r,c) for r in range(self.size) 
+                       for c in range(self.size) 
+                       if (r,c) not in exclude]
+        else:
+            indices = [(r,c) for r in range(self.size) 
+                       for c in range(self.size)]
+        return indices
+    
+    def colinear_targets(self, coords, include_misses=False):
+        """
+        Returns the two untargeted coordinates at the end of the line made 
+        by the input coordinates (which are typically hits).
+        
+        If the include_misses parameter is True, the returned targets will be
+        the first untargeted space at the end of the line of hits and/or 
+        misses made by the input coords. 
+        
+        If include_misses is False (default), the returned targets will be
+        the first untargeted space at the end of the line of hits only formed
+        by coords. Any misses encountered at the end of the line will 
+        terminate the search in that direction
+        
+        As an example, consider the following row (where - = untargeted, 
+        O = miss, X = hit):
+        
+            - - 0 X 0 X X X - - 
+        
+        If coords = [(0,5), (0,6)] and include_misses == True, the output 
+        will be [(0,1), (0,8)]. However, if include_misses == False, the
+        output will be [(0,8)] because there is no untarget spot to the left
+        of the row of contiguous hits (i.e., there is a miss at (0,4) that
+        ends the search).
+        
+
+        Parameters
+        ----------
+        coords : list of tuples
+            A list of at least 2 row/col tuples. These coordinates should lie
+            along a single row or column on the board.
+        include_misses : Bool
+            If True, the coord.
+
+        Returns
+        -------
+        list
+            A list containing the row/col tuples of the coordinates at the
+            end of the line formed by the input coordinates.
+
+        
+        """
+        # find the first unknown or edge
+        ds = (np.diff(np.array(coords), axis=0))
+        ia,ib = sorted([coords[0], coords[-1]])
+        choices = []
+        
+        if np.any(ds[:,0] != 0):
+            while (ia[0] >= 0 and 
+                   self.target_grid[ia] != TargetValue.UNKNOWN):
+                ia = (ia[0] - 1, ia[1])
+            while (ib[0] < self.size and 
+                   self.target_grid[ib] != TargetValue.UNKNOWN):
+                ib = (ib[0] + 1, ib[1])
+            if (ia[0] >= 0 and 
+                    (self.target_grid[ia[0]+1,ia[1]] != TargetValue.MISS or
+                     include_misses == True)):
+                choices += [ia]
+            if (ib[0] < self.size and 
+                    (self.target_grid[ib[0]-1,ib[1]] != TargetValue.MISS or
+                     include_misses == True)):
+                choices += [ib]
+                
+        elif np.any(ds[:,1] != 0):
+            while (ia[1] >= 0 and 
+                   self.target_grid[ia] != TargetValue.UNKNOWN):
+                ia = (ia[0], ia[1] - 1)
+            while (ib[1] < self.size and 
+                   self.target_grid[ib] != TargetValue.UNKNOWN):
+                ib = (ib[0], ib[1] + 1)
+            if (ia[1] >= 0 and 
+                    (self.target_grid[ia[0],ia[1]+1] != TargetValue.MISS or
+                     include_misses == False)):
+                choices += [ia]
+            if (ib[1] < self.size and 
+                    (self.target_grid[ib[0],ib[1]-1] != TargetValue.MISS or
+                     include_misses == False)):
+                choices += [ib]
+        
+        return [rc for rc in choices if rc not in coords]
+    
+    def targets_around(self, coord, diagonal=False, 
+                       targeted=False, untargeted=False):
+        """
+        Returns a list of coordinates on the target grid that surround
+        the input coordinate. See also coords_around.
+
+        Parameters
+        ----------
+        coord : tuple or Coord
+            A tuple that contains (row,col) indices, or a Coord instance.
+        diagonal : Bool, optional
+            True if the method should return the (up to) four coordinates
+            that are diagonal to the input coordinate. The default is False.
+        targeted : Bool, optional
+            If True, only the coordinates around coord that have previously
+            been targeted will be returned. The default is False.
+        untargeted : Bool, optional
+            If True, only the coordinates around coord that have not yet
+            been targeted will be returned. The default is False.
+
+        Returns
+        -------
+        list of tuples
+            A list of tuples that correspond to the coordinates that are
+            immediately adjacent (and diagonally adjacent, if diagonal is True)
+            to the input coordinate.
+
+        """
+
+        if untargeted:
+            exclude = self.all_targets(targeted=True)
+        if targeted:
+            exclude = self.all_targets(untargeted=True)
         else:
             exclude = []
         
@@ -837,236 +1283,377 @@ class Board:
         return [(rows[i], cols[i]) for i in range(len(rows)) if 
                    (rows[i], cols[i]) not in exclude]
     
-    def colinear_target_coords(self, coords, untargeted):
-        """Returns the two coordinates at the end of the line made
-        by the input coordinates.
+    def is_valid_target_ship_placement(self, placement, ship):
         """
-        # find the first unknown or edge
-        ds = (np.diff(np.array(coords), axis=0))
-        ia,ib = sorted([coords[0], coords[-1]])
-        choices = []
-        
-        if np.any(ds[:,0] != 0):
-            while (ia[0] >= 0 and ia[0] < self.size and 
-                   self.target_grid[ia] != TargetValue.UNKNOWN):
-                ia = (ia[0] - 1, ia[1])
-            while (ib[0] >= 0 and ib[0] < self.size and 
-                   self.target_grid[ib] != TargetValue.UNKNOWN):
-                ib = (ib[0] + 1, ib[1])
-            if (ia[0] >= 0 and 
-                    (self.target_grid[ia[0]+1,ia[1]] != TargetValue.MISS or
-                     untargeted == False)):
-                choices += [ia]
-            if (ib[0] < self.size and 
-                    (self.target_grid[ib[0]-1,ib[1]] != TargetValue.MISS or
-                     untargeted == False)):
-                choices += [ib]
-                
-        elif np.any(ds[:,1] != 0):
-            while (ia[1] >= 0 and ia[1] < self.size and 
-                   self.target_grid[ia] != TargetValue.UNKNOWN):
-                ia = (ia[0], ia[1] - 1)
-            while (ib[1] >= 0 and ib[1] < self.size and 
-                   self.target_grid[ib] != TargetValue.UNKNOWN):
-                ib = (ib[0], ib[1] + 1)
-            if (ia[1] >= 0 and 
-                    (self.target_grid[ia[0],ia[1]+1] != TargetValue.MISS or
-                     untargeted == False)):
-                choices += [ia]
-            if (ib[1] < self.size and 
-                    (self.target_grid[ib[0],ib[1]-1] != TargetValue.MISS or
-                     untargeted == False)):
-                choices += [ib]
-        
-        return [rc for rc in choices if rc not in coords]
-          
-    def possible_ships_grid(self, simplify=False, by_type=False):
-        """
-        Returns the number of possible ship placements at each coordinate on 
-        the target grid. P[r,c] is equal to the number of uniqe positions and 
-        headings that would cause a ship to have a space located at [r,c], 
-        added together for each ship type.
+        Returns True if the target grid allows for the input ship and placement 
+        (starting coord and heading). That is, if there are only unknowns or 
+        hits at the coordinates spanned by the ship's placement, or if any such
+        spaces are known to be hits on the input ship type.
 
         Parameters
         ----------
-        simplify : Bool, optional
-            If True, the returned grid contains the number of possible ships
-            that can be at location (r,c), rather than the number of possible
-            placements for each ship. The default is False.
+        placement : dict
+            A dict with 'coord' and 'heading' keys that specify the coordinate
+            and facing of a ship.
+        ship : Ship
+            The ship instance that is being checked for consistency with the
+            target grid's state.
 
         Returns
         -------
-        psg : numpy.ndarray
-            A two-dimensional array with shape equal to the board's target_grid
-            shape. The value at row r and column c is equal to the number of
-            ways any ship could be placed so that it has a space at (r,c).
-            The maximum value is 34 (2x5 + 2x4 + 2x3 + 2x3 + 2x2).
-            
-            If the simplify parameter is True, the value at (r,c) is the number
-            of possible ships that could be at (r,c). In this case, the value
-            is between 0 and 5.
+        Bool
+            True if the placement for a target ship lies on the target grid and
+            is consistent with the known hits & misses.
 
         """
-        untargeted = self.all_coords(untargeted=True)
-        # possible ship grid
-        psg = np.zeros((len(SHIP_DATA), self.size, self.size))
-        for n in range(1,len(SHIP_DATA)+1):
-            ship = Ship(n)
-            placements = self.all_valid_placements('target', ship.ship_id,
-                                                   headings='NW')
-            placement_coords = []
-            for p in placements:
-                ds = self.relative_coords_for_heading(p[1], ship.length)
-                placement_coords += [tuple(x) for x in 
-                                     list(np.tile(np.array(p[0]), 
-                                                  (ship.length,1)) 
-                                          + np.array(ds).transpose())]
-            coord_freq = Counter(placement_coords)
-            for coord in untargeted:
-                psg[n-1, coord[0], coord[1]] = coord_freq[coord]
-        if simplify:
-            psg = np.sum(psg > 0, axis=0)
-        elif not by_type:
-            psg = np.sum(psg, axis=0)
-        return psg
+        coords = self.coords_for_placement(placement, ship.length)
+        on_board = self.is_valid_coord(coords)
+        if np.any(on_board == False):
+            return False
+        rows,cols = zip(*coords)
+        rows = np.array(rows)
+        cols = np.array(cols)
+        grid_vals = self.target_grid[rows, cols]
+        fits_target_grid = np.all((grid_vals == TargetValue.HIT)
+                                  + (grid_vals == TargetValue.UNKNOWN)
+                                  + (np.round(grid_vals) == ship.ship_id))
+        return fits_target_grid
     
-    def possible_targets_at_coord(self, coord, out='dict'):
+    def all_valid_target_placements(self, ship_type):
         """
-        An dictionary with the number of possible placements for each ship type
-        at the input coordinate.
+        Returns all of the possible placement dictionaries on the target grid
+        for the input ship_type parameter. A placement is possible/valid for
+        a given ship_type if it is fully on the board, does not overlap another known ship,
+        does not contain any known misses, and contains ALL known instances
+        of hits to that type of ship. 
+
+        Parameters
+        ----------
+        ship_type : ShipType (EnumInt) or int 1-5
+            The type of ship for which to determine possible placements.
+
+        Returns
+        -------
+        placements : list
+            List of placement dictionaries that contain all possible 
+            coordinates and headings for the input ship_type.
+
+        """
+        
+        ship = Ship(ship_type)
+        ship_len = ship.length
+        if np.any(self.target_grid == ship_type):
+            allowed_coords = np.zeros((self.size, self.size))
+            rows,cols = np.where(self.target_grid == ship_type)
+            for (r,c) in zip(rows,cols):
+                allowed_coords[(r-ship_len+1):(r+ship_len-1),c] = 1
+                allowed_coords[r,(c-ship_len+1):(c+ship_len-1)] = 1      
+            pass
+        else:
+            allowed_coords = np.ones((self.size, self.size))
+        allowed_coords[self.target_grid == TargetValue.MISS] = 0
+        allowed_coords[(self.target_grid > 0) 
+                       * (self.target_grid != ship_type)] = 0
+        rows,cols = np.where(allowed_coords)
+        coords = list(zip(rows,cols))
+        placements = []
+        for heading in ["N","W"]:
+            for coord in coords:
+                p = {'coord': coord, 'heading': heading}
+                values = self.target_grid[coord]
+                if np.all((values == TargetValue.UNKNOWN) 
+                          + (values == TargetValue.HIT) 
+                          + (np.round(values) == ship_type)):
+                    placements += [p]
+        return placements
+        
+    # Ocean Grid Methods
+    
+    def all_coords(self, unoccuppied=False, occuppied=False):
+        """
+        Returns a list of all coordinates (row/column indices)on the ocean 
+        grid. Returns only coordinates that are occuppied or unoccuppied by a
+        ship if either the 'occuppied' or 'unoccuppied' parameters are set to 
+        True. Only one of these parameters may be True at a time.
+
+        Parameters
+        ----------
+        unoccuppied : Bool, optional
+            When True, only coordinates that are not occuppied by a ship are
+            returned.
+            The default is False.
+        occuppied : Bool, optional
+            When True, only coordinates that are occuppied by a ship are 
+            returned.
+            The default is False. Occuppied and unoccuppied cannot both be 
+            True.
+
+        Returns
+        -------
+        List of tuples.
+            A list of 2-element tuples, each of which corresponds to the row/
+            column indices of a coordinate on the ocean grid that are 
+            unoccuppied or occuppied, as set by the corresponding input 
+            parameters.
+
+        """
+        if unoccuppied and occuppied:
+            raise ValueError("Only one of 'unoccuppied' and 'occuppied' may"
+                             " be True.")
+        if unoccuppied:
+            r,c = np.where(self.ocean_grid == 0)
+            indices = list(zip(r,c))
+        elif occuppied:
+            r,c = np.where(self.target_grid != 0)
+            indices = list(zip(r,c))
+        else:
+            indices = [(r,c) for r in range(self.size) 
+                       for c in range(self.size)]
+        return indices
+    
+    def coords_around(self, coord, diagonal=False, 
+                     occuppied=False, unoccuppied=False):
+        """
+        Returns a list of coordinates on the ocean grid that surround
+        the input coordinate. See also targets_around.
+
+        Parameters
+        ----------
+        coord : tuple or Coord
+            A tuple that contains (row,col) indices, or a Coord instance.
+        diagonal : Bool, optional
+            True if the method should return the (up to) four coordinates
+            that are diagonal to the input coordinate. The default is False.
+        occuppied : Bool, optional
+            If True, only the coordinates around coord that have a ship in
+            them will be returned. The default is False.
+        unoccuppied : Bool, optional
+            If True, only the coordinates around coord that DO NOT have a ship
+            in them will be returned. The default is False.
+
+        Returns
+        -------
+        list of tuples
+            A list of tuples that correspond to the coordinates that are
+            immediately adjacent (and diagonally adjacent, if diagonal is True)
+            to the input coordinate.
+
+        """
+
+        if unoccuppied:
+            exclude = self.all_coords(occuppied=True)
+        if occuppied:
+            exclude = self.all_coords(unoccuppied=True)
+        else:
+            exclude = []
+        
+        if diagonal:
+            rows = coord[0] + np.array([0, -1, -1, -1, 0, 1, 1, 1])
+            cols = coord[1] + np.array([1, 1, 0, -1, -1, -1, 0, 1])
+        else:
+            rows = coord[0] + np.array([0, -1, 0, 1])
+            cols = coord[1] + np.array([1, 0, -1, 0])
+        ivalid = ((rows >= 0) * (rows < self.size) * 
+                  (cols >= 0) * (cols < self.size))
+        rows = rows[ivalid]
+        cols = cols[ivalid]
+        return [(rows[i], cols[i]) for i in range(len(rows)) if 
+                   (rows[i], cols[i]) not in exclude]
+    
+    def is_valid_placement(self, placement, length, unoccuppied=False):
+        """
+        Returns True if a ship with the specified length placed at a coordinate
+        and heading contained in placement lies entirely on the board.
+        If the unoccuppied parameter is set to True, the placement is only
+        valid if it does not overlap another ship.
+
+        Parameters
+        ----------
+        placement : dict
+            A dict with 'coord' and 'heading' keys that specify the coordinate
+            and facing of a ship.
+        length : int
+            The length of a ship placed at the input placement parameter.
+        unoccuppied : TYPE
+            If True, the input placement and length must not intersect an
+            existing ship on the ocean grid. If False, the method just checks
+            whether the placement lies entirely on the board.
+
+        Returns
+        -------
+        Bool
+            True if the placement for a ship with specified length lies on the
+            board (and, if unoccuppied == True, if the ship would not overlap
+            another existing ship).
+
+        """
+        coords = self.coords_for_placement(placement, length)
+        if unoccuppied:
+            rows,cols = zip(*coords)
+            if np.any(self.ocean_grid[rows,cols] > 0):
+                return False
+        return np.all(self.is_valid_coord(coords))
+    
+    def all_valid_ship_placements(self, ship_type, distance=0, diagonal=True,
+                                  edge_buffer=0, alignment=Align.ANY):
+        """
+        Return all placements that would allow the input ship_type to be placed
+        on the ocean grid.
+
+        Parameters
+        ----------
+        ship_type : hipType (EnumInt) or int 1-5.
+            The type of ship that is allowed at the returned placements.
+        distance : int, optional
+            Only include placements in which the ship is at least this many
+            spaces from any part of any other ship. A distance of 0 means
+            that the placements can be adjacent to another ship.
+            The default is 0.
+        diagonal : Bool, optional
+            If True, and if the distance input is 0, placements that would put
+            ship diagonally adjacent to another ship are allowed (whereas they 
+            are not allowed if diagonal is False).
+            If distance is >1, diagonal = True causes the calculated separation
+            between ship coordinates to be rounded down. Otherwise the 
+            separation will be rounded to the nearest integer.
+            diagonal has no effect if distance is 0. 
+            The default is True.
+        edge_buffer : int, optional
+            If 0, placements next to the board edges are allowed. If
+            a positive integer, any placements must allow for at least 
+            edge_buffer spaces between any part of the ship and the board's 
+            edge. 
+            The default is 0.
+        alignment : Align (Enum) value, optional
+            The ship placements must be aligned horizontally if alignment is
+            Align.HORIZONTAL or vertically if alignment is Align.VERTICAL. 
+            Ship alignment can be either horizontal or vertical if 
+            alignemnt is Align.ANY. The default is Align.ANY.
+
+        Returns
+        -------
+        placements : list of placement dictionaries ("coord" and "heading" 
+                                                     keys).
+
+        """
+        headings_dict = {"N": (1,0), "S": (-1,0), "E": (0,-1), "W": (0,1)}
+        ship = Ship(ship_type)
+        round_fcn = np.round if diagonal else np.floor
+        ship_len = ship.length
+        
+        if alignment == Align.VERTICAL:
+            allowed_headings = ["N"]
+        elif alignment == Align.HORIZONTAL:
+            allowed_headings = ["W"]
+        else:
+            allowed_headings = ["N", "W"]
+        placements = []
+        
+        rows,cols = np.where(self.ocean_grid > 0)
+        occuppied_coords = list(zip(rows,cols))
+        for heading in allowed_headings:
+            allowed_spaces = np.ones((self.size, self.size))
+            if edge_buffer:
+                allowed_spaces[edge_buffer,:] = 0.
+                allowed_spaces[-edge_buffer,:] = 0.
+                allowed_spaces[:,edge_buffer] = 0.
+                allowed_spaces[0,-edge_buffer] = 0.                
+            ds = headings_dict[heading]
+            if ds[0] > 0:
+                allowed_spaces[-(ds[0]*ship_len-1):,:] = 0.
+            elif ds[1] > 0:
+                allowed_spaces[:,-(ds[1]*ship_len-1):] = 0.
+            rows,cols = np.where(allowed_spaces)
+            coords = list(zip(rows,cols))
+            for coord in coords:
+                if self.ocean_grid[coord] != 0:     # coord already occuppied
+                    allowed_spaces[coord] = 0
+                # check if placement starting at coord is within distance
+                # of any existing ships (also checks if there is overlap)
+                else:   
+                    p = {'coord': coord, 'heading': heading}
+                    current_coords = self.coords_for_placement(p, ship_len)
+                    min_separation = np.min(Board.coords_to_coords_distances(
+                        current_coords, occuppied_coords))
+                    if round_fcn(min_separation) <= distance + 1:
+                        allowed_spaces = 0
+            rows,cols = np.where(allowed_spaces)
+            coords = list(zip(rows,cols))
+            placements += [{'coord': c, 'heading': heading} for c in coords]
+        return placements
+    
+    # Ship Methods
+    
+    def ship_for_type(self, ship_type):
+        """
+        Returns the Ship instance on the board that corresponds to the 
+        input ship_type.
+
+        Parameters
+        ----------
+        ship_type : int, ShipType, or string.
+            An integer or string that describes the desired ship. If an 
+            integer or ShipType enum, ship_type should be 1-5. If a
+            string, it should be 'patrol', 'sub(marine)', 'destroyer',
+            'battleship' or 'carrier'.
+
+        Returns
+        -------
+        Ship
+            The instance of Ship on the board that corresponds to the 
+            identifier ship_type. If no 
+
+        """
+        if isinstance(ship_type, (int, np.integer)):
+            if ship_type not in Ship.data:
+                raise ValueError(f"Integer {ship_type} does not correspond "
+                                 f" to a valid ship type.")
+        elif isinstance(ship_type, str):
+            ship_type = Ship.type_for_name(ship_type)
+        return self.fleet[ship_type]
+    
+    def ship_at_coord(self, coord):
+        
+        """
+        Get the ship at the input coordinate.
+
+        Parameters
+        ----------
+        coord : Tuple containing (row,col) or Coord
+            A coordinate on the board.
+
+        Returns
+        -------
+        Ship or None
+            If the input coordinate is occuppied by a ship, the ship instance.
+            Otherwise, if coordinate is unoccuppied, None.
+
+        """
+        # indexing coord allows for both tuple and Coord input.
+        val = self.ocean_grid[(coord[0], coord[1])]
+        if val == 0:
+            return None
+        else:
+            return self.ship(val)
+        
+    def damage_at_coord(self, coord):
+        """
+        Returns the damage at the slot corresponding to the input coordinate.
+        If no ship is present or if the ship is not damaged at that particular
+        slot, returns 0. Otherwise, if that spot has been hit, returns 1.
 
         Parameters
         ----------
         coord : tuple
-            A coordinate on the board (two elements, row and column).
-        out : str, optional
-            String describing what type of output to return. 
-            If 'dict', a dictionary with ship type as key will be returned.
-            If 'array', an array ordered by ship type. The default is 'dict'.
+            A tuple containing a (row,col) index.
 
         Returns
         -------
-        nplacements_by_ship : dict or array (see parameter 'out')
-            The number of possible placements at the input coord
-            for each ship type.
+        int
+            The number of times the ship at the input coordinate has been hit.
+            0 if no ship is present at the coordinate, or if there is a ship
+            but it has not been damaged yet.
 
-        """
-        nplacements_by_ship = {}
-        target_grid = self.target_grid
-        value_at_coord = target_grid[coord]
-        
-        def valid_target_placement(placement, length, ship_id=None):
-            print(placement)
-            coords = self.coords_for_placement(placement, length)
-            print(coords)
-            print(self.valid_coord(coords))
-            if np.any(~self.valid_coord(coords)):
-                return False
-            target_grid_values = np.array(
-                [self.target_grid[c] for c in coords]
-                )
-            return np.all(target_grid_values != TargetValue.MISS)
-        
-        def nhits_on_ship(ship):
-            return np.sum(np.round(self.target_grid) == ship.length) 
-        
-        for ship_id in sorted(SHIP_DATA):
-            ship = Ship(ship_id)
-            # If ship is sunk and overlaps coord, there is only 1 possible
-            #   target at that spot. If it does not overlap coord, there are
-            #   0 targets (of this ship type).
-            if (np.any(self.target_grid == ship.ship_id + SUNK_OFFSET) or
-                    nhits_on_ship(ship) == ship.length):
-                # ship is sunk.
-                nplacements_by_ship[ship_id] = int(coord in 
-                                                self.coords_for_ship(ship))
-                
-            # If coord has a ship_id, nplacements should be 0 for all other 
-            #   ship_ids
-            elif (value_at_coord > TargetValue.HIT 
-                      and value_at_coord != ship_id):
-                nplacements_by_ship[ship_id] = 0
-                
-            else:
-                dn = self.relative_coords_for_heading("N", length=ship.length)
-                dw = self.relative_coords_for_heading("W", length=ship.length)
-                placements = [((coord[0] - dr, coord[1]), "N") for dr in dn[0]]
-                placements += [((coord[0], coord[1] - dr), "W") for dr in dw[1]]
-                placements = [p for p in placements if 
-                              valid_target_placement(p, ship.length)]
-                # Eliminate placements that do not contain ALL instances of
-                #   ship_id on the target grid.
-                rows, cols = np.where(np.round(self.target_grid) == 
-                                      ship.ship_id)
-                hits = list(zip(rows, cols))
-                if hits:
-                    ok_placements = []
-                    for p in placements:
-                        ship_coords = self.coords_for_placement(p, ship.length)
-                        if all([h in ship_coords for h in hits]):
-                            ok_placements += [p]
-                    placements = ok_placements
-                    
-                # ----> Should be able to modify nplacement values if certain
-                # ships can only be in certain locations ([4, -2, 4] means that
-                # the -2 should be a 4, although this should be take care of
-                # by some other logic in the 'update' methods.)
-                
-                nplacements_by_ship[ship_id] = len(placements)
-            
-        return nplacements_by_ship
-            
-        # nplacements_by_ship = {}
-        # for ship in list(self.fleet.values()):
-        #     offset = np.arange(ship.length)
-        #     count = 0
-        #     for shift in offset:
-        #         placement = ((coord[0] + shift, coord[1]), "S")
-        #         coords = self.coords_for_placement(placement, ship.length)
-        #         rows,cols = zip(*coords)
-        #         if all(r>0 and r<self.size and c>0 and c<self.size 
-        #                for (r,c) in coords):
-        #             values = self.target_grid[rows,cols]
-        #             count += np.all((values == TargetValue.HIT) 
-        #                             + (values == TargetValue.UNKNOWN))
-        #         placement = ((coord[0], coord[1] + shift), "E")
-        #         coords = self.coords_for_placement(placement, ship.length)
-        #         if all(r>0 and r<self.size and c>0 and c<self.size 
-        #                for (r,c) in coords):
-        #             rows,cols = zip(*coords)
-        #             values = self.target_grid[rows,cols]
-        #             count += np.all((values == TargetValue.HIT) 
-        #                             + (values == TargetValue.UNKNOWN))
-        #     nplacements_by_ship[ship.ship_id] = count
-        # return nplacements_by_ship
-    
-    # Ship access functions
-    def afloat_ships(self):
-        """Returns a list of the Ship instances that are still afloat."""
-        return np.array([ship.afloat() for ship in list(self.fleet.values())])
-            
-    def coords_for_ship(self, ship):
-        """Returns the row/col coordinates occuppied by the input Ship instance."""
-        if isinstance(ship, Ship):
-            ship = int(ship.ship_id)
-        if not isinstance(ship, int):
-            raise TypeError("ship must be an instance of Ship or an int.")
-        r,c = np.where(self.ocean_grid == ship)
-        return list(zip(r,c))
-    
-    def ship_at_coord(self, coord):
-        """Returns the Ship object placed at the input coordinate.
-        If no ship is present at the input space, returns None.
-        """        
-        ship_id = self.ocean_grid[coord[0],coord[1]]
-        if ship_id == 0:
-            return None
-        return self.fleet[ShipType(ship_id)]
-    
-    def damage_at_coord(self, coord):
-        """Returns the damage at the slot corresponding to the input coordinate.
-        If no ship is present or if the ship is not damaged at that particular
-        slot, returns 0. Otherwise, if that spot has been hit, returns 1.
         """
         ship = self.ship_at_coord(coord)
         if not ship:
@@ -1074,9 +1661,67 @@ class Board:
         coords = self.coords_for_ship(ship)
         return ship.damage[coords.index(coord)]
     
+    def is_fleet_afloat(self):
+        """
+        Returns an array of Bools, where element i is True if the ship with
+        ShipType i+1 is afloat, and False if it is sunk.
+
+        Returns
+        -------
+        numpy.ndarray
+            A 5-element boolean array.
+        """
+        keys = sorted(self.fleet.keys())
+        return np.array([self.fleet[k].is_afloat() for k in keys])
+            
+    def coords_for_ship(self, ship):
+        """
+        Returns a list of the row/col coordinates occuppied by the input Ship 
+        instance.
+
+        Parameters
+        ----------
+        ship : Ship
+            The ship instance to be coordinated.
+
+        Returns
+        -------
+        list
+            List of coordinate tuples (row,col).
+
+        """
+        if isinstance(ship, Ship):
+            ship_type = int(ship.ship_id)
+        else:
+            ship_type = ship
+        if not isinstance(ship_type, int):
+            raise TypeError("ship must be an instance of Ship or an int.")
+        r,c = np.where(self.ocean_grid == ship_type)
+        if len(r) != Ship.data[ship_type]["length"]:
+            raise ValueError("The number of spaces on the ocean grid occuppied"
+                             " by the ship do not match the ship's length.")
+        return list(zip(r,c))
+    
     def placement_for_ship(self, ship):
-        """Returns a tuple with the coordinate and heading of the input ship
-        or ship_id integer."""
+        """
+        Returns a tuple with the coordinate and heading of the input ship
+        or ShipType value.
+
+        Parameters
+        ----------
+        ship : Ship
+            The ship to locate.
+
+        Returns
+        -------
+        dict
+            Dictionary containing values for 'coord' and 'heading' keys.
+            dict['coord'] is a tuple containing the first (row,col) of the 
+            placement. 
+            dict['heading'] is a direction character ("N"/"S"/"E"/"W") 
+            indicating which way the ship is facing.
+
+        """
         rows,cols = zip(*self.coords_for_ship(ship))
         if rows[0] == rows[-1]:
             # horizontal
@@ -1089,243 +1734,243 @@ class Board:
         else:
             raise Exception(f"Invalid coordinates for ship {ship}.")
         return {"coord": coord, "heading": heading}
-            
-    # Ship placement functions        
-    def all_valid_ship_placements(self, ship_id, distance=0, diagonal=True,
-                                  edges=True, alignment=Align.ANY,
-                                  headings='all'):
-        """Returns a list of all possible placements (consisting of row, 
-        column, and heading) on the board. The distance parameter is the 
-        minimum separation between ships.
-        If the diagonal input is True, the four coordinates 
-        diagonally touching existing ships are considered valid (and invalid
-        if diagonal is False).
-        The returned list of placements is in the form of a list of tuples
-        ((row, column), heading).
-        """
-        headings_dict = {"N": (1,0), "S": (-1,0), "E": (0,-1), "W": (0,1)}
-        ship = Ship(ship_id)
-        if headings.lower() == 'all':
-            allowed_headings = ["N","S","E","W"]
-        else:
-            allowed_headings = [h.upper() for h in headings]
-        if alignment == Align.VERTICAL:
-            allowed_headings = [h for h in allowed_headings if h in ["N", "S"]]
-        elif alignment == Align.HORIZONTAL:
-            allowed_headings = [h for h in allowed_headings if h in ["E", "W"]]
-        else:
-            pass
-            
-        grid = self.ocean_grid
-        
-        # Determine whether edge coordinates can be occuppied
-        rcmin = 1 - edges
-        rcmax = self.size - (1 - edges) - 1
-        unoccuppied = self.all_coords(unoccuppied=True)
-        placements = []
-        for unocc in unoccuppied:
-            for h in allowed_headings:
-                ds = np.vstack(([0,0], np.cumsum(np.tile(
-                    headings_dict[h], (ship.length-1,1)), axis=0)))
-                rows,cols = unocc[0] + ds[:,0], unocc[1] + ds[:,1]
-                ok = True
-                if (np.any(rows < rcmin) or np.any(rows > rcmax) or 
-                    np.any(cols < rcmin) or np.any(cols > rcmax) or
-                    np.any(_grid[rows,cols])):
-                        ok = False
-                if distance > 0 and ok:
-                    dmin = self.size
-                    for (r,c) in zip(rows, cols):
-                        other_coords = []
-                        for other_ship in list(self.fleet.values()):
-                            other_coords += self.coords_for_ship(other_ship)
-                        if ok and len(other_coords):
-                            other_coords = np.array(other_coords)
-                            delta = (other_coords 
-                                     - np.tile((r,c), (other_coords.shape[0],1)))
-                            d = np.sqrt(np.sum(delta**2, axis=1))
-                            dmin = np.min((np.min(d), dmin))
-                            if diagonal:
-                                dmin = np.ceil(dmin)
-                            else:
-                                dmin = np.floor(dmin)
-                            ok = ok * (dmin > distance)
-                if ok:
-                    placements += [(unocc, h)]
-        return placements
-        
-    def all_valid_target_placements(self, ship_id):
-        """Returns a list of valid target placements based on the current 
-        state of the target grid. A placements is valid for a given ship if
-        that ship is fully on the board, does not overlap another known ship,
-        does not contain any known misses, and contains ALL known instances
-        of hits to that type of ship."""
-        ship = ship_id if isinstance(ship_id, Ship) else ship(ship_id)
-        coords = self.all_coords()
-        valid_rows,valid_cols = np.where(np.round(self.target_grid) 
-                                         == ship.ship_id)
-        must_include_coords = list(zip(valid_rows,valid_cols))
-        rows,cols = np.where(np.round(self.target_grid) == TargetValue.MISS)
-        must_exclude_coords = list(zip(rows,cols))
-        if must_include_coords:
-            coords = [(r,c) for (r,c) in coords if 
-                      (r in valid_rows) or (c in valid_cols)]
-            coords = [(r,c) for (r,c) in coords if 
-                      (np.max(np.abs(r - valid_rows)) +  
-                       np.max(np.abs(c - valid_cols)) < ship.length)]
-        coords = [c for c in coords if self.valid_coord(c)]
-        
+    
+    # Fleet Placement Methods
     
     def place_fleet(self, placements):
-        """Places all ships according to the data in the input dictionary,
-        which has the following format:
         """
-        for (k,place) in placements.items():
-            self.place_ship(k, place["coord"], place["heading"])
-            
-    def place_ship(self, ship_desc, coord, heading):
-        """Places a ship corresponding to the input ship_desc (which may be an
-        integer 1-5 or a string like "Patrol", "Carrier", etc.)
-        on the grid at the input indices and the input heading 
-        (a string, "N", "S", "E", or "W"). The ship is added to the board's fleet.
-        Returns True if the placement was successful (i.e., if the input 
-        placement is valid) and False otherwise, in which case the ship is
-        NOT added to the fleet.
-        """
-        if isinstance(ship_desc, str):
-            ship_id = [k.value for k in SHIP_DATA.keys() if 
-                       SHIP_DATA[k]["name"] == ship_desc.title()][0]
-        else:
-            ship_id = ship_desc
-            
-        ship = Ship(ship_id)
-        if not self.is_valid_ship_placement(ship_id, coord, heading):
-            raise Exception(f"Cannot place {ship.name} at {coord}.")
-            return False
-        else:
-            self.fleet[ShipType(ship_id)] = ship
-            drows,dcols = self.relative_coords_for_heading(heading, ship.length)
-            self.ocean_grid[coord[0] + drows, coord[1] + dcols] = ship_id
-            return True
-        
-    def is_valid_ship_placement(self, ship_id, coord, heading):
-        """Returns True if the input ship can be placed at the input spot with
-        the input heading, and False otherwise.
-        The ship/space/heading is valid if the ship:
-            1. Is not a duplicate of an existing ship
-            2. Does not hang off the edge of the grid
-            3. Does not overlap with an existing ship on the grid
-        """
-        length = SHIP_DATA[ShipType(ship_id)]["length"]
-        if ShipType(ship_id) in self.fleet.keys():
-            return False
-        drows,dcols = self.relative_coords_for_heading(heading, length)
-        rows,cols = coord[0] + drows, coord[1] + dcols
-        if (np.any(rows < 0) or np.any(rows >= self.size) or 
-            np.any(cols < 0) or np.any(cols >= self.size)):
-                return False
-        occuppied = self.all_coords(occuppied=True)
-        for (r,c) in zip(rows,cols):
-            if (r,c) in occuppied:
-                return False
-        return True
-    
-    def ready_to_play(self):
-            """Returns True if the full fleet is placed on the grid, all ships are
-            undamaged, and the target map is empty. Returns False otherwise (which
-            indicates that either setup is not complete, or the game has already
-            started).
-            """
-            if not np.all(self.target_grid == TargetValue.UNKNOWN):
-                return False
-            for ship in self.fleet.values():
-                if np.any(ship.damage > 0):
-                    return False
-            ship_ids = [ship.ship_id for ship in self.fleet.values()]
-            if sorted(ship_ids) != list(range(1, len(SHIP_DATA)+1)):
-                return False
-            return True
-        
-    # Random coordinate functions
-    def random_coord(self, unoccuppied=False, untargeted=False):
-        """Returns a random row/col coordinate from the board.
-        
-        If the unoccuppied input is True, the coordinate will be one that does 
-        not contain a ship on this board's ocean grid (note that if this is 
-        used publically, this could reveal ship locations).
+        Places the ships with locations described by the placements dict onto
+        the ocean grid.
+
+        Parameters
+        ----------
+        placements : dict
+            A dictionary with keys equal to the ShipTypes (int/EnumInt 1-5) 
+            that are to be placed on the board. The value for each ShipType
+            key should be a placement dictionary, with format:
+                placement['coord']: Tuple containing the (row,col) of the
+                    first coordinate of the ship.
+                placement['heading']: Character specifying the cardinal
+                    direction ("N"/"S"/"E"/"W") that the ship should point.
                     
-        If the untargeted input is True, the coordinate will be one that has
-        not been shot at from this board (i.e., no peg on the target grid).
+            An example placements dictionary would be as follows:
+                placements = {
+                    ShipType(1): {'coord': (r1,c1), 'heading': h1}},
+                    ShipType(1): {'coord': (r2,c2), 'heading': h2}},
+                    ShipType(1): {'coord': (r3,c3), 'heading': h3}},
+                    ShipType(1): {'coord': (r4,c4), 'heading': h4}}
+                    ShipType(1): {'coord': (r5,c5), 'heading': h5}}
+                }
+            where rX and cX are integers between 0 and 9 (for a 10 x 10 board)
+            and hX is a direction-specifying character "N", "S", "E", or "W".
+                
+
+        Returns
+        -------
+        None.
+
         """
-        if unoccuppied and untargeted:
-            raise ValueError("Inputs unoccuppied and untargeted cannot both \
-                             be true.")
-        if unoccuppied:
-            exclude = self.all_coords(occuppied=True)
-        elif untargeted:
-            exclude = self.all_coords(targeted=True)
+        for (k,placement) in placements.items():
+            self.add_ship(k, placement["coord"], placement["heading"])
+    
+    def add_ship(self, ship_type, coord, heading):
+        """
+        Add a ship to the board of the specified type at the input coordinate
+        and heading.
+
+        Parameters
+        ----------
+        ship_type : ShipType (EnumInt) or int 1-5.
+            A ShipType value indicating the type of ship to place on the board.
+        coord : Tuple continaing (row,col)
+            The row and column where the front of the ship should be placed.
+        heading : chr
+            A character indicating the direction the ship should face. Valid
+            values are "N", "S", "E", and "W". The ship will be positioned
+            such that its front is at the input coord, and its front will 
+            face toward heading. All other slots on the ship will be located
+            at coordinates behind coord, when facing toward this heading.
+
+        Raises
+        ------
+        Exception
+            Raised if the input ship_type already exists on the board or if
+            the placement would cause the ship to hang off the edge of the
+            board.
+
+        Returns
+        -------
+             None.
+
+        """
+        if isinstance(ship_type, str):
+            ship_type = Ship.type_for_name(ship_type)
+        elif isinstance(ship_type, Ship):
+            ship_type = ship_type.ship_id            
+        ship = Ship(ship_type)
+        if not self.is_valid_placement({'coord':coord, 'heading':heading}, 
+                                       ship.length, unoccuppied=True):
+            raise Exception(f"Cannot place {ship.name} at {coord}.")
         else:
-            exclude = []
-        indices = [(i,j) for i in range(self.size) 
-                   for j in range(self.size) 
-                   if (i,j) not in exclude]
-        return indices[np.random.choice(range(len(indices)))]
-    
-    def random_heading(self, alignment=None):
-        """Returns a random heading: N/S/E/W."""
-        if alignment == None or alignment == Align.ANY:
-            return(np.random.choice(['N','S','E','W']))
+            self.fleet[ship.ship_id] = ship
+            drows,dcols = self.rel_coords_for_heading(heading, ship.length)
+            self.ocean_grid[coord[0] + drows, coord[1] + dcols] = ship.ship_id
         
-        if isinstance(alignment, str):
-            alignment = alignment.upper()
-            for a in ["NORTH","SOUTH","EAST","WEST"]:
-                alignment = alignment.replace(a, a[0])
-                for a in ["/", "-", "|"]:
-                    alignment = alignment.replace(a, "")
-        if (alignment == "NS" or alignment == "SN" or alignment == "UD" or 
-            alignment == "DU" or alignment == Align.VERTICAL):
-            return(np.random.choice(['N','S']))
-        elif (alignment == "EW" or alignment == "WE" or alignment == "LR" or 
-              alignment == "RL" or Align.HORIZONTAL):
-            return(np.random.choice(['E','W']))
+    # Gameplay Methods
+                                  
+    def incoming_at_coord(self, coord):
+        """
+        Determines the outcome of an opponent's shot landing at the input
+        coord. If there is a ship at that location, the outcome is a hit and
+        the ship's slot corresponding to the input space is damaged. 
+        If the hit means that all slots in a ship are damaged, the ship is sunk.
+        If there is no ship at the location, the outcome is a miss.
+
+        Parameters
+        ----------
+        coord : tuple
+            A two-element tuple specifying the (row,column) of the targeted
+            coordinate.
+
+        Returns
+        -------
+        outcome : dict
+            A dictionary containing information about the results of the
+            shot at coord. It will contain the following key/value pairs:
+                "hit": Bool
+                "coord": equal to the coord parameter
+                "sunk": Bool
+                "sunk_ship_id": ShipType enum
+                "message": string
+
+        """
+        if isinstance(coord, Coord):
+            coord = coord.rowcol
+        ship = self.ship_at_coord(coord)
+        if not ship:
+            outcome = {"hit": False, "coord": coord, 
+                       "sunk": False, "sunk_ship_id": None, "message": []}
+        else:
+            outcome = {"hit": True, "coord": coord, "sunk": False, 
+                       "sunk_ship_id": None, "message": []}
+            sunk, damage = self.damage_ship_at_coord(ship, coord)
+            msg = []
+            if damage > 1:
+                msg += [f"Repeat target: {coord}."]
+            if sunk:
+                msg += [f"{ship.name} sunk."]
+                outcome["sunk"] = True
+                outcome["sunk_ship_id"] = ship.ship_id
+        return outcome
     
-    # Combat functions
-    def update_target_grid_with_outcome(self, outcome):
-        """Updates the targets grid with the results of the 'outcome' dict,
-        which contains the target coordinate, hit indicator, and identity
-        of a sunk ship (if applicable).
+    def damage_ship_at_coord(self, ship, coord):
         """
-        self.update_target_grid(outcome["coord"], outcome["hit"],
-                                outcome["sunk_ship_id"])
+        Adds a point of damage to the ship at the input coord. 
+        Raises an exception if the coordinate does not lie on the ship in 
+        question.
+
+        Parameters
+        ----------
+        ship : Ship
+            The ship that will be damaged.
+        coord : tuple
+            Two-element tuple with row/col on the board where a hit occurred.
+
+        Raises
+        ------
+        ValueError
+            Raised if ship is not in the board's fleet.
+        Exception
+            Raised if ship does not sit on coord.
+
+        Returns
+        -------
+        tuple : (Bool, int)
+            The bool indicates whether ship has been sunk, and the int gives
+            the number of times coord has been hit (usually 1).
+
+        """
         
-    def update_target_grid(self, target_coord, hit, ship_id):
-        """Updates the target map at the input space with the hit informaton
-        (hit and ship_id, if a ship was sunk) provided as inputs.
-        Prints a message to the console if the target space has already been
-        targeted.
+        if ship not in self.fleet.values():
+            raise ValueError("Input ship instance must point to one of "
+                             "the object in this Board's fleet.")
+        ship_coords = self.coords_for_ship(ship)
+        dmg_slot = [i for i in range(len(ship_coords)) 
+                    if ship_coords[i] == coord]
+        if len(dmg_slot) != 1:
+            raise Exception(f"Could not determine unique damage location for "
+                            f"target {coord}")
+        damage = ship.hit(dmg_slot[0])
+        return ship.sunk(), damage
+        
+    def update_target_grid(self, outcome):
         """
-        if isinstance(target_coord, Coord):
-            target_coord = target_coord.rowcol
+        Updates the targets grid with the results of the outcome dictionary.
+        which contains the following key/value pairs:
             
-        prev_val = self.target_grid[target_coord]
-        if hit:
-            if ship_id:
-                self.target_grid[target_coord] = ship_id + SUNK_OFFSET
-                self.update_grid_for_sink(target_coord, ship_id)
+
+        Parameters
+        ----------
+        outcome : dict
+            Dictionary that contains the following key/value pairs:
+                
+            "coord" : Tuple with the (row,col) where the shot was fired.
+            "hit" : Bool - True if a ship was hit, False if shot was a miss.
+            "sunk" : Bool - True if a ship was sunk by the outcome's shot.
+            "sunk_ship_id" : int corresponding to the ShipType of a ship if
+                a ship was sunk by the outcome's shot..
+
+        Returns
+        -------
+        None.
+
+        """
+        coord = outcome["coord"]
+        ship_type = outcome["sunk_ship_id"]
+        if isinstance(coord, Coord):
+            coord = coord.rowcol
+        prev_val = self.target_grid[coord]
+        if outcome["hit"]:
+            if ship_type:
+                self.target_grid[coord] = ship_type + SUNK_OFFSET
+                self.update_target_grid_for_sink(coord, ship_type)
             else:
-                self.target_grid[target_coord] = TargetValue.HIT   
+                self.target_grid[coord] = TargetValue.HIT   
         else:
-            self.target_grid[target_coord] = TargetValue.MISS
+            self.target_grid[coord] = TargetValue.MISS
         if prev_val != TargetValue.UNKNOWN:
-            print(f"Repeat target: {Coord(target_coord).lbl}")
-           
-    def update_grid_for_sink(self, coord, sunk_ship_id):
-        """If there are hits on the target grid that can be unambiguously 
-        assigned to the ship sunk at the input coord, convert those hits 
-        to ship_id for book-keeping purposes. This helps with determining 
-        which target ships may be where on the grid."""
+            print(f"Repeat target: {Coord(coord).lbl}")
+    
+    def update_target_grid_for_sink(self, coord, sunk_ship_id):
+        """
+        Updates the target grid based on knowing the identity of the ship
+        sunk at the coord parameter. Updates will be made if there are hits 
+        on the target grid that can be unambiguously assigned to a ship type
+        based on the knowledge that sunk_ship_id is at coord.
+
+        Parameters
+        ----------
+        coord : Tuple (row,col)
+            The (row,col) coordinate of the shot that sunk ship with type
+            sunk_ship_id.
+        sunk_ship_id : ShipType (EnumInt)
+            The type of the ship that was sunk by the shot that landed at
+            coord.
+
+        Raises
+        ------
+        ValueError
+            Raised if the target grid is not consistent with the input ship 
+            type being located at coord.
+
+        Returns
+        -------
+        None.
+
+        """
+        pass
         print("Updating for sink: ", coord,sunk_ship_id)
-        ship_length = SHIP_DATA[ShipType(sunk_ship_id)]["length"]
+        ship_length = Ship.data[ShipType(sunk_ship_id)]["length"]
         
         # Can any existing hits be attributed to the ship that was just sunk?
         target_cols = self.target_grid[coord[0],:]
@@ -1339,7 +1984,7 @@ class Board:
         
         if not (len(contiguous_cols) >= ship_length or 
                 len(contiguous_rows) >= ship_length):
-            raise Exception("Failed to find ship location in target grid.")
+            raise ValueError("Failed to find ship location in target grid.")
         if len(contiguous_cols) < ship_length:
             # ship must be oriented vertically
             rows = []
@@ -1369,96 +2014,47 @@ class Board:
             # otherwise, could not determine location uniquely.
         else:
             # cannot determine orientation.
-            pass        
-                                    
-    def incoming_at_coord(self, coord):
-        """Determines the outcome of an opponent's shot landing at the input
-        coord. If there is a ship at that location, the outcome is a hit and
-        the ship's slot corresponding to the input space is damaged. 
-        If the hit means that all slots in a ship are damaged, the ship is sunk.
-        If there is no ship at the location, the outcome is a miss.
-        In either case, if the space has previously been targeted, the outcome
-        will return a 'repeat target' message.
-        The returned outcome is a dict with the following key/value pairs:
-            hit: True/False
-            sunk: True/False
-            sunk_ship_id: ShipId Enum
-            repeat_target: True/False
-            message: list containing the following, with optional parts in ():
-                ['hit'/'miss', ('[shipname] sunk'), ('repeat target')]
+            pass     
+        
+    def is_ready_to_play(self):
         """
-        if isinstance(coord, Coord):
-            coord = coord.rowcol
-        ship = self.ship_at_coord(coord)
-        if not ship:
-            outcome = {"hit": False, "coord": coord, 
-                       "sunk": False, "sunk_ship_id": None, "message": []}
-        else:
-            outcome = {"hit": True, "coord": coord, "sunk": False, 
-                       "sunk_ship_id": None, "message": []}
-            sunk, damage = self.damage_ship_at_coord(ship, coord)
-            msg = []
-            if damage > 1:
-                msg += [f"Repeat target: {coord}."]
-            if sunk:
-                msg += [f"{ship.name} sunk."]
-                outcome["sunk"] = True
-                outcome["sunk_ship_id"] = ship.ship_id
-        return outcome
+        Returns True if the board is ready to play a new game. This is defined
+        as: 
+            1. All 5 ships have been placed on the board.
+            2. None of the ships are damage.
+            3. No shots have been fired (i.e., both the ocean and target grids 
+                are empty).
+        
+        Returns
+        -------
+        bool
+            True if the board has all ship.
+
+        """
+        if not np.all(self.target_grid == TargetValue.UNKNOWN):
+            return False
+        if not (np.sum(self.ocean_grid) == 
+                sum([ship.length for ship in self.fleet.values()])):
+            return False
+        for ship in self.fleet.values():
+            if np.any(ship.damage > 0):
+                return False
+        ship_ids = [ship.ship_id for ship in self.fleet.values()]
+        if sorted(ship_ids) != list(range(1, len(Ship.data)+1)):
+            return False
+        return True
     
-    def damage_ship_at_coord(self, ship, coord):
-        """Adds a point of damage to the ship at the input coord. 
-        Raises an exception if the coordinate does not lie on the ship in 
-        question.
-        Returns a tuple with a bool indicating whether the ship has been
-        sunk, and the number of times coord has been hit.
-        """
-        if ship not in self.fleet_list:
-            raise ValueError("Input ship instance must point to one of "
-                             "the object in this Board's fleet.")
-        ship_coords = self.coords_for_ship(ship)
-        dmg_slot = [i for i in range(len(ship_coords)) 
-                    if ship_coords[i] == coord]
-        if len(dmg_slot) != 1:
-            raise Exception(f"Could not determine unique damage location for "
-                            f"target {coord}")
-        damage = ship.hit(dmg_slot[0])
-        return ship.sunk(), damage
-        
-    @property
-    def fleet_list(self):
-        """Returns the ship objects in the fleet attribute as a list."""
-        return list(self.fleet.values())
-        
-    # Test function
-    def test(self, targets=True):
-        self.place_ship(1, Coord("J9"), "R") 
-        self.place_ship(2, Coord("E8"), "N") 
-        self.place_ship(4, Coord("G2"), "W") 
-        self.place_ship(3, Coord("B6"), "W") 
-        self.place_ship(5, Coord("A5"), "N")
-        
-        if targets:
-            self.update_target_grid((0,4), True, None)
-            self.update_target_grid((0,3), True, None)
-            self.update_target_grid((0,5), True, ShipType(3))
-            self.update_target_grid((2,8), False, None)
-            self.update_target_grid((9,7), False, None)
-            self.update_target_grid((6,7), False, None)
-            self.update_target_grid((4,4), False, None)
-            self.update_target_grid((3,2), False, None)
-            self.update_target_grid((1,6), False, None)
-            
-            self.fleet[ShipType(2)].hit(0)
-            self.fleet[ShipType(2)].hit(1)
-            self.fleet[ShipType(2)].hit(2)
-            self.fleet[ShipType(4)].hit(3)
-            self.fleet[ShipType(5)].hit(2)
-        
     # Visualization functions
+    
     def ocean_grid_image(self):
-        """Returns a matrix corresponding to the board's ocean grid, with
+        """
+        Returns a matrix corresponding to the board's ocean grid, with
         blank spaces as 0, unhit ship slots as 1, and hit slots as 2.
+
+        Returns
+        -------
+        im : 2d numpy array
+        
         """
         im = np.zeros((self.size, self.size))
         for ship_id in self.fleet:
@@ -1469,16 +2065,32 @@ class Board:
         return im
 
     def target_grid_image(self):
-        """Returns a matrix corresponding to the board's vertical grid (where 
+        """
+        Returns a matrix corresponding to the board's vertical grid (where 
         the player keeps track of their own shots). 
-        The matrix has a 0 for no shot, -1 for miss (white peg), 1 for a hit, 
-        and 10 + shipId (11-15) if the spot is a hit on a known ship type."""
+        The matrix has a -2 for no shot, -1 for miss (white peg), 0 for a hit, 
+        and shipId (1-5) if the spot is a hit on a known ship type.
+
+        Returns
+        -------
+        im : 2d numpy array
+
+        """
         return self.target_grid
         
     def ship_rects(self):
-        """Returns a dictionary with keys equal to ShipId and values equal to
+        """
+        Returns a dictionary with keys equal to ShipId and values equal to
         the rectangles that bound each ship on the grid. The rectangles have
         format [x, y, width, height].
+
+        Returns
+        -------
+        rects : dict
+            Dictionary with the following keys/values:
+                rects[ship_type] = numpy array with (x,y,width,height) for
+                                    each ship_type.
+
         """
         rects = {}
         for ship in list(self.fleet.values()):
@@ -1490,10 +2102,17 @@ class Board:
         return rects
         
     def color_str(self):
-        """Returns a string in color that represents the state of the board.
-        to a human player.
         """
-            
+        Returns a string in color that represents the state of the board.
+        to a human player.
+
+        Returns
+        -------
+        s : str
+            A string with background and foreground text color codes encoded
+            to display a color text representation of the board.
+
+        """  
         def format_target_id(x):
             s = f"{str(round(x))}"
             if x - round(x) == SUNK_OFFSET:
@@ -1534,9 +2153,28 @@ class Board:
         return s
     
     def show(self, grid="both"):
-        """Shows images of the target map and grid on a figure with two 
+        """
+        Shows images of the target map and grid on a figure with two 
         subaxes. Colors the images according to hit/miss (for target map) and
         damage (for the grid). Returns the figure containing the images.
+
+        Parameters
+        ----------
+        grid : str, optional
+            The grid to display; "ocean", "target", or "both". 
+            The default is "both".
+
+        Raises
+        ------
+        ValueError
+            Raised if the grid paramater is not "ocean", "liquid" or "both".
+
+        Returns
+        -------
+        fig : pyplot figure
+            A figure containing axes with the image of the board's grid(s) 
+            that have been selected using the grid parameter.
+
         """
         if grid.lower() == "both":
             grid = ["target", "ocean"]
@@ -1630,126 +2268,357 @@ class Board:
                 axs[-1].add_patch(peg)
             # ships
             ship_boxes = self.ship_rects()
-            for shipId in ship_boxes:
-                box = ship_boxes[shipId]
+            for ship_type in ship_boxes:
+                box = ship_boxes[ship_type]
                 axs[-1].add_patch( 
                     mpl.patches.Rectangle((box[0], box[1]), box[2], box[3], \
                                           edgecolor = ship_outline_color,
                                           fill = False,                                       
                                           linewidth = 2))
                 axs[-1].text(box[0]+0.12, box[1]+0.65, 
-                             SHIP_DATA[shipId]["name"][0])
+                             Ship.data[ship_type]["name"][0])
 
         fig.set_facecolor(bg_color)
         return fig
     
+    # Targeting Methods
+    
+    def all_target_placements_for_ship_type(self, ship_type):
+        """
+        Return a list of placement dictionaries that enumerate all possible
+        placements where the input ship can be located based on the hits, 
+        misses, and known ship types (based on sink events) on the target grid.
+
+        Parameters
+        ----------
+        ship_type : ShipType (EnumInt) or int 1-5.
+            The type of ship that can be placed at all returned placements.
+
+        Returns
+        -------
+        placements : list
+            List of dictionaries, each of which contains placement info
+            for a possible ship location and heading. Each dict has keys
+            "coord" and "heading", which have values that are a (row,col) tuple
+            and a direction character ("N","S","E","W"), respectively.
+
+        """
+        placements = []
+        ship = Ship(ship_type)
+        bad_targets = (self.target_grid == TargetValue.MISS)
+        for tp in range(min(Ship.data),max(Ship.data.keys())+1):
+            if (tp != ship_type):
+                bad_targets += (np.round(self.target_grid) == tp)
+        rows,cols = np.where(~bad_targets)
+        for coord in list(zip(rows,cols)):
+            placement = {"coord":coord, "heading":"N"}
+            if self.is_valid_target_ship_placement(placement, ship):
+                placements += [placement]
+            placement = {"coord":coord, "heading":"W"}
+            if self.is_valid_target_ship_placement(placement, ship):
+                placements += [placement]
+        return placements
+    
+    def possible_ship_types_at_coord(self, coord, output="dict"):
+        """
+        Determines which ships are possible at the input coord, and how many
+        possible placements (for each ship type) would result in a ship at 
+        that coord.
+
+        Parameters
+        ----------
+        coord : tuple 
+            The (row, col) tuple for the coordinate of interest.
+        output : str (optional)
+            If output is "dict", the return value is a dictionary that
+            contains information about the number of ways a ship may be placed
+            in order to occupy the input coordinate.
+            If output is "list", the return value is a list that contains the
+            ShipType integers for the ships that are possible at coordinate, 
+            without any information about the number of ways each ship may
+            be placed.
+            The default is "dict".
+            
+        Returns
+        -------
+        out : dictionary or list
+            If output is "dict":
+                out[n] where n is a ShipType (integer 1-5) is equal
+                to the number of ways a ship of type n could be placed on the
+                board and occupy the input coordinate.
+            If output is "list":
+                out is a list that contains the ShipType values for each 
+                ship that may potentially occupy the input coordinate. If coord
+                is at a miss site, out will be empty. If it is at a site with 
+                a known ship type, it will have length 1. Otherwise it could 
+                be up to 5 elements long.
+
+        """
+        counts = {}
+        ship_types = [ShipType(k) for k in range(min(Ship.data), max(Ship.data)+1)]
+        for tp in ship_types:
+            counts[tp] = 0
+        for tp in ship_types:
+            placements = self.all_target_placements_for_ship_type(tp)
+            ship_len = Ship.data[tp]["length"]
+            for placement in placements:
+                place_coords = self.coords_for_placement(placement, ship_len)
+                counts[tp] += int(coord in place_coords)
+        if output == "dict":
+            return counts
+        elif output == "list":
+            return [k for k in ship_types if counts[k] > 0]
+        
+    def possible_targets_grid(self, by_type=False):
+        """
+        Determines the possible ships at each space on the board, and the
+        number of ways each ship could be placed in order to occupy that 
+        coordinte. In effect, the value at each point is the number of ways
+        ANY ship could be positioned and occupy that point. It is therefore
+        something like a target probability density.
+
+        Parameters
+        ----------
+        by_type : Bool, optional
+            If False, the method returns a 2d array, where element [i,j] is
+            the number of ways any ship can be positioned and overlap 
+            row i and column j.
+            If by_type is True, the output grid_by_ship[n] will return
+            a 2d N x N array (N is board size) where element [i,j] is the 
+            number of ways a ship of type n can be positioned and overlap 
+            row i and column j.
+            The default is False.
+
+        Returns
+        -------
+        grid_by_ship : numpy array (2d or 3d)
+            The number of possible placements at each row/col that will allow
+            a ship to overlap that row/col. See by_type for details.
+
+        """
+        grid_by_ship = {}
+        ship_types = [ShipType(k) for k in range(min(Ship.data), 
+                                                 max(Ship.data)+1)]
+        for k in ship_types:
+            grid_by_ship[k] = None
+            
+        for tp in ship_types:
+            ship_len = Ship.data[tp]["length"]
+            grid = np.zeros(self.target_grid.shape)
+            placements = self.all_target_placements_for_ship_type(tp)
+            for p in placements:
+                for coord in self.coords_for_placement(p, ship_len):
+                    grid[coord] += 1
+            grid_by_ship[tp] = grid
+        if by_type == False:
+            out = np.zeros(self.target_grid.shape)
+            for k in grid_by_ship:
+                out += grid_by_ship[k]
+            return out
+        return grid_by_ship
+
+    
 #%% Ship Class
 class Ship:
-    """A ship that can be placed on a Battleship board, with
-    slots for tracking damage.
-    Initialize using one of the following:
-        Ship(ShipId.CARRIER)    (ShipId.CARRIER is the same as ShipId(5))
-        Ship(5) 
-        Ship("Carrier")         (case insensitive)
-        """
+    
+    _data = {ShipType.PATROL: {"name": "Patrol".title(), "length": 2},
+             ShipType.DESTROYER: {"name": "Destroyer".title(), "length": 3},
+             ShipType.SUBMARINE: {"name": "Submarine".title(), "length": 3},
+             ShipType.BATTLESHIP: {"name": "Battleship".title(), "length": 4},
+             ShipType.CARRIER: {"name": "Carrier".title(), "length": 5}
+             }
     
     def __init__(self, ship_type):
-        """Returns an instance of class Ship described by the input 
-        ship_type, which may be an integer 1-5, an instance of the
-        Enum ShipId, or one of the following (case insensitive) strings:
-            Patrol, Destroyer, Submarine, Battleship, Carrier
+        """
+        Initialize a ship object with type ship_type, 
+
+        Parameters
+        ----------
+        ship_type : int, ShipType (EnumInt), or str
+            An integer value (or equivalent EnumInt) between 1 and 5, or
+            a string that describes the type of ship desired. Valid strings
+            and their corresponding integer values are:
+                Patrol (1)
+                Destroyer (2)
+                Submarine (3)
+                Battleship (4)
+                Carrier (5)
+
+        Returns
+        -------
+        An instance of Ship with properties corresponding the the ship_type
+        parameter. Each instance has properties:
+            ship_id (ShipType enum)
+            name (str)
+            length (int)
+            damage (numpy 1d array with length equal to the length property)
+            
+
         """
         if isinstance(ship_type, str):
-            id_match = [k for k in SHIP_DATA if 
-                        SHIP_DATA[k]["name"].lower() == ship_type.lower()]
-            if id_match:
-                self._ship_id = id_match[0]
-            else:
-                ValueError("For string input, ship_type must be one of: " 
-                           + ", ".join([SHIP_DATA[k]["name"] for k in SHIP_DATA])) 
-        else:
-            self._ship_id = ship_type
+            ship_type = Ship.type_for_name(ship_type)
+        self._ship_id = ShipType(ship_type)
             
-        self.name = SHIP_DATA[self._ship_id]["name"]
-        self.length = SHIP_DATA[self._ship_id]["length"]
+        self.name = Ship.data[self._ship_id]["name"]
+        self.length = Ship.data[self._ship_id]["length"]
         self.damage = np.zeros(self.length, dtype=np.int8)
         
     def __len__(self):
-        """Returns an integer corresponding to the number of spaces
-        the ship occupies, which is also the number of damage slots
-        for the ship.
+        """
+        Return the length of the ship, which is equal to both the number
+        of adjacent coordinates on the board that the ship occuppies, as well
+        as the number of damage slots on the ship.
+        
+        Returns
+        -------
+        int
+            The number of slots on the ship insance.
         """
         return self.length
     
     def __str__(self):
-        """Returns a string listing the Ship instance name, length, damage,
+        """
+        Returns a string listing the Ship instance name, length, damage,
         and whether the ship is sunk.
+
+        Returns
+        -------
+        str
+        
         """
         s = (f"{self.name} (id = {self._ship_id}) - {self.length} slots, " 
               f"damage: {str(self.damage)}")
-        if self.sunk():
+        if self.is_sunk():
             s += " (SUNK)"
         return(s)
     
     def __repr__(self):
-        return f"Ship({self.ship_id})"        
-    
-    # @classproperty
-    # def data(cls, ship_id=None):
-    #     """
-    #     Returns a dictionary with keys for each of the possible ship types
-    #     (see ShipType) and values equal to a dictionary of properties for 
-    #     the type of ship corresponding to the key.
-    #     The properties dictionary has keys 'name' and 'length'.
+        """
+        Returns a string representation that can be evaluated to recreate
+        the object
 
-    #     An ShipType value (or integer 1-5) can be provided as an input, in 
-    #     which case only the properties dictionary for that type of ship
-    #     will be returned.
+        Returns
+        -------
+        str
         
-    #     Parameters
-    #     ----------
-    #     ship_id : TYPE, optional
-    #         A ShipType value or integer between 1 and 5. If provided, the
-    #         properties dictionary for only the ship type corresponding to the
-    #         input value will be returned (1 = patrol, 2 = destroyer, 
-    #         3 = submarine, 4 = battleship, 5 = carrier).
-    #         The default is None.
-
-    #     Returns
-    #     -------
-    #     dict
-    #         A dictionary with dictionary values (for no input parameters) or
-    #         a dictionary with 'name' and 'length' keys (for int input 
-    #         parameter).
-
-    #     """
-    #     if ship_id == None:
-    #         return SHIP_DATA
-    #     else:
-    #         return SHIP_DATA[ship_id]
+        """
+        return f"Ship({self.ship_id})"        
         
     @property
     def ship_id(self):
         return self._ship_id
     
+    @classmethod
+    def type_for_name(self, name):
+        """
+        Returns the ship type integer that corresponds to the input ship name
+        string. The output is a value of the ShipType enum, which is equivalent
+        to an integer.
+
+        Parameters
+        ----------
+        name : str
+            A string description of the desired ship type. One of 'patrol',
+            'destroyer', 'submarine' (or 'sub'), 'battleship', or 'carrier'.
+            Case insensitive.
+
+        Returns
+        -------
+        ShipType (EnumInt)
+            An integer value 1-5 that can be used as a key for accessing
+            info about the particular ship type from the 'data' class
+            method.
+
+        """
+        name = name.title()
+        try:
+            idx = [ship_dict["name"] for ship_dict in 
+                   Ship.data.values()].index(name)
+        except ValueError:
+            if name == "Sub":
+                name += "marine"
+            elif name == "Patrol Boat":
+                name = "Patrol"
+            idx = [ship_dict["name"] for ship_dict in 
+                   Ship.data.values()].index(name)
+        return list(Ship.data.keys())[idx]
+    
+    @classmethod
+    @property
+    def data(cls):
+        """
+        Returns a dictionary containing name and length data for each type
+        of ship. The dictionary's keys are the ShipType Enum values.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        dict
+            A dictionary with the following keys. The corresponding value
+            gives the value of property described by the key for the ship type
+            given by the ship_type input (1 for Patrol, 2 for Destroyer, etc.)
+            'name':     The name of the ship type.
+            'length':   The number of coordinates the ship occupied on a board
+                        (equal to number of times it can be hit before sinking).
+
+        """
+        return cls._data
+        
+    # Combat Methods
+    
     def hit(self, slot):
-        """Adds damage to the input slot position. Returns the damage value
-        at the hit position. Raises an exception if the input slot is invalid 
-        (i.e., if it is non-integer, less than 0, or greater than the ship
-         length minus 1).
+        """
+        Adds a point of damage to the ship at the input slot position.
+
+        Parameters
+        ----------
+        slot : int
+            The slot at which the ship will be damaged. Conforms to standard
+            list indexing, so slot should be on the interval [0, ship.length].
+
+        Raises
+        ------
+        ValueError
+            If the slot parameter falls outside of the valid index range for
+            the ship's length.
+
+        Returns
+        -------
+        int     The total amage at the input slot.
+
         """
         if slot < 0 or slot >= self.length:
             raise ValueError("Hit at slot #" + str(slot) + " is not valid; "
                              "must be 0 to " + str(self.length-1))
-        if self.damage[slot] > 0:
-            Warning("Slot " + str(slot) + " is already damaged.")
         self.damage[slot] += 1
+        if self.damage[slot] > 1:
+            Warning("Slot " + str(slot) + " is already damaged.")
         return(self.damage[slot])
     
-    def afloat(self):
-        """Returns True if the ship has not taken damage at each slot."""
+    def is_afloat(self):
+        """
+        Returns True if the ship has not been sunk (i.e., if it has at least
+        one slot that has not taken damage).
+
+        Returns
+        -------
+        Bool    True if the ship is still afloat, False if it is not.
+
+        """
+        
         return(any(dmg < 1 for dmg in self.damage))
 
-    def sunk(self):
-        """Returns True if the ship has taken damage at each slot."""
+    def is_sunk(self):
+        """
+        Returns True if the ship has been sunk (i.e., if it has at least
+        one damage level at each slot).
+
+        Returns
+        -------
+        Bool    True if the ship is sunk, False if it is afloat.
+
+        """
         return(all(dmg > 0 for dmg in self.damage))
