@@ -11,7 +11,7 @@ import numpy as np
 import matplotlib as mpl
 from matplotlib import pyplot as plt
 from enum import Enum, IntEnum
-from collections import Counter
+#from collections import Counter
 
 #%% Constants
 
@@ -799,7 +799,7 @@ class Board:
                 'sunk_ship_id': sunk_ship_id}
         
     @classmethod
-    def test(cls,targets=True):
+    def test(cls,layout=0,targets=True):
         """
         Returns a test board with ships at arbitrary (consistent) locations.
 
@@ -815,28 +815,38 @@ class Board:
 
         """
         board = cls(10)
-        board.add_ship(1, Coord("J9"), "R") 
-        board.add_ship(2, Coord("E8"), "N") 
-        board.add_ship(4, Coord("G2"), "W") 
-        board.add_ship(3, Coord("B6"), "W") 
-        board.add_ship(5, Coord("A5"), "N")
         
-        if targets:
-            board.update_target_grid(Board.outcome((0,4), True))
-            board.update_target_grid(Board.outcome((0,3), True))
-            board.update_target_grid(Board.outcome((0,5), True, True, ShipType(3)))
-            board.update_target_grid(Board.outcome((2,8), False))
-            board.update_target_grid(Board.outcome((9,7), False))
-            board.update_target_grid(Board.outcome((6,7), False))
-            board.update_target_grid(Board.outcome((4,4), False))
-            board.update_target_grid(Board.outcome((3,2), False))
-            board.update_target_grid(Board.outcome((1,6), False))
+        if layout == 0:
+            board.add_ship(1, Coord("J9"), "R") 
+            board.add_ship(2, Coord("E8"), "N") 
+            board.add_ship(4, Coord("G2"), "W") 
+            board.add_ship(3, Coord("B6"), "W") 
+            board.add_ship(5, Coord("A5"), "N")
             
-            board.fleet[ShipType(2)].hit(0)
-            board.fleet[ShipType(2)].hit(1)
-            board.fleet[ShipType(2)].hit(2)
-            board.fleet[ShipType(4)].hit(3)
-            board.fleet[ShipType(5)].hit(2)
+            if targets:
+                board.update_target_grid(Board.outcome((0,4), True))
+                board.update_target_grid(Board.outcome((0,3), True))
+                board.update_target_grid(Board.outcome((0,5), True, True, ShipType(3)))
+                board.update_target_grid(Board.outcome((2,8), False))
+                board.update_target_grid(Board.outcome((9,7), False))
+                board.update_target_grid(Board.outcome((6,7), False))
+                board.update_target_grid(Board.outcome((4,4), False))
+                board.update_target_grid(Board.outcome((3,2), False))
+                board.update_target_grid(Board.outcome((1,6), False))
+                
+                board.fleet[ShipType(2)].hit(0)
+                board.fleet[ShipType(2)].hit(1)
+                board.fleet[ShipType(2)].hit(2)
+                board.fleet[ShipType(4)].hit(3)
+                board.fleet[ShipType(5)].hit(2)
+        
+        elif layout == 1:
+            board.update_target_grid(Board.outcome((1,1), False))
+            board.update_target_grid(Board.outcome((1,2), True))
+            board.update_target_grid(Board.outcome((1,3), True))
+            board.update_target_grid(Board.outcome((1,4), True, True, ShipType(3)))
+            board.update_target_grid(Board.outcome((2,4), True))
+            board.update_target_grid(Board.outcome((3,4), True))
         
         return board
 
@@ -1144,6 +1154,7 @@ class Board:
         elif targeted:
             r,c = np.where(self.target_grid != TargetValue.UNKNOWN)
             indices = list(zip(r,c))
+            return indices
         if exclude:
             indices = [(r,c) for r in range(self.size) 
                        for c in range(self.size) 
@@ -1262,10 +1273,12 @@ class Board:
             to the input coordinate.
 
         """
-
+        if untargeted and targeted:
+            raise ValueError("untargeted and targeted inputs cannot "
+                             "both be True.")
         if untargeted:
             exclude = self.all_targets(targeted=True)
-        if targeted:
+        elif targeted:
             exclude = self.all_targets(untargeted=True)
         else:
             exclude = []
@@ -1342,29 +1355,42 @@ class Board:
         
         ship = Ship(ship_type)
         ship_len = ship.length
-        if np.any(self.target_grid == ship_type):
+        if np.any(np.round(self.target_grid) == ship_type):
             allowed_coords = np.zeros((self.size, self.size))
-            rows,cols = np.where(self.target_grid == ship_type)
+            rows,cols = np.where(np.round(self.target_grid) == ship_type)
+            must_include = set(zip(rows,cols))
             for (r,c) in zip(rows,cols):
-                allowed_coords[(r-ship_len+1):(r+ship_len-1),c] = 1
-                allowed_coords[r,(c-ship_len+1):(c+ship_len-1)] = 1      
-            pass
+                row0 = np.max((r-ship_len+1, 0))
+                row1 = np.min((r+ship_len-1, self.size-1))
+                col0 = np.max((c-ship_len+1, 0))
+                col1 = np.min((c+ship_len-1, self.size-1))
+                allowed_coords[row0:(row1+1),c] = 1
+                allowed_coords[r,col0:(col1+1)] = 1      
         else:
             allowed_coords = np.ones((self.size, self.size))
+            must_include = set()
         allowed_coords[self.target_grid == TargetValue.MISS] = 0
         allowed_coords[(self.target_grid > 0) 
-                       * (self.target_grid != ship_type)] = 0
+                       * (np.round(self.target_grid) != ship_type)] = 0
         rows,cols = np.where(allowed_coords)
         coords = list(zip(rows,cols))
         placements = []
         for heading in ["N","W"]:
             for coord in coords:
                 p = {'coord': coord, 'heading': heading}
-                values = self.target_grid[coord]
-                if np.all((values == TargetValue.UNKNOWN) 
-                          + (values == TargetValue.HIT) 
-                          + (np.round(values) == ship_type)):
-                    placements += [p]
+                if self.is_valid_placement(p, ship_len):
+                    pcoords = self.coords_for_placement(p, ship_len)
+                
+                    pr,pc = zip(*pcoords)
+                    values = self.target_grid[pr,pc]
+                    if np.all((values == TargetValue.UNKNOWN) 
+                              + (values == TargetValue.HIT) 
+                              + (np.round(values) == ship_type)):
+                        if must_include:
+                            if must_include.issubset(set(pcoords)):
+                                placements += [p]
+                        else:
+                            placements += [p]
         return placements
         
     # Ocean Grid Methods
@@ -1634,7 +1660,7 @@ class Board:
         if val == 0:
             return None
         else:
-            return self.ship(val)
+            return self.fleet[val]
         
     def damage_at_coord(self, coord):
         """
@@ -1906,8 +1932,6 @@ class Board:
     def update_target_grid(self, outcome):
         """
         Updates the targets grid with the results of the outcome dictionary.
-        which contains the following key/value pairs:
-            
 
         Parameters
         ----------
@@ -2283,41 +2307,43 @@ class Board:
     
     # Targeting Methods
     
-    def all_target_placements_for_ship_type(self, ship_type):
-        """
-        Return a list of placement dictionaries that enumerate all possible
-        placements where the input ship can be located based on the hits, 
-        misses, and known ship types (based on sink events) on the target grid.
+    # *** Redundant with all_valid_target_placements, which takes hits with
+    #       known ship types into accound in ruling out placements.
+    # def all_target_placements_for_ship_type(self, ship_type):
+    #     """
+    #     Return a list of placement dictionaries that enumerate all possible
+    #     placements where the input ship can be located based on the hits, 
+    #     misses, and known ship types (based on sink events) on the target grid.
 
-        Parameters
-        ----------
-        ship_type : ShipType (EnumInt) or int 1-5.
-            The type of ship that can be placed at all returned placements.
+    #     Parameters
+    #     ----------
+    #     ship_type : ShipType (EnumInt) or int 1-5.
+    #         The type of ship that can be placed at all returned placements.
 
-        Returns
-        -------
-        placements : list
-            List of dictionaries, each of which contains placement info
-            for a possible ship location and heading. Each dict has keys
-            "coord" and "heading", which have values that are a (row,col) tuple
-            and a direction character ("N","S","E","W"), respectively.
+    #     Returns
+    #     -------
+    #     placements : list
+    #         List of dictionaries, each of which contains placement info
+    #         for a possible ship location and heading. Each dict has keys
+    #         "coord" and "heading", which have values that are a (row,col) tuple
+    #         and a direction character ("N","S","E","W"), respectively.
 
-        """
-        placements = []
-        ship = Ship(ship_type)
-        bad_targets = (self.target_grid == TargetValue.MISS)
-        for tp in range(min(Ship.data),max(Ship.data.keys())+1):
-            if (tp != ship_type):
-                bad_targets += (np.round(self.target_grid) == tp)
-        rows,cols = np.where(~bad_targets)
-        for coord in list(zip(rows,cols)):
-            placement = {"coord":coord, "heading":"N"}
-            if self.is_valid_target_ship_placement(placement, ship):
-                placements += [placement]
-            placement = {"coord":coord, "heading":"W"}
-            if self.is_valid_target_ship_placement(placement, ship):
-                placements += [placement]
-        return placements
+    #     """
+    #     placements = []
+    #     ship = Ship(ship_type)
+    #     bad_targets = (self.target_grid == TargetValue.MISS)
+    #     for tp in range(min(Ship.data),max(Ship.data.keys())+1):
+    #         if (tp != ship_type):
+    #             bad_targets += (np.round(self.target_grid) == tp)
+    #     rows,cols = np.where(~bad_targets)
+    #     for coord in list(zip(rows,cols)):
+    #         placement = {"coord":coord, "heading":"N"}
+    #         if self.is_valid_target_ship_placement(placement, ship):
+    #             placements += [placement]
+    #         placement = {"coord":coord, "heading":"W"}
+    #         if self.is_valid_target_ship_placement(placement, ship):
+    #             placements += [placement]
+    #     return placements
     
     def possible_ship_types_at_coord(self, coord, output="dict"):
         """
@@ -2359,7 +2385,8 @@ class Board:
         for tp in ship_types:
             counts[tp] = 0
         for tp in ship_types:
-            placements = self.all_target_placements_for_ship_type(tp)
+            #placements = self.all_target_placements_for_ship_type(tp)
+            placements = self.all_valid_target_placements(tp)
             ship_len = Ship.data[tp]["length"]
             for placement in placements:
                 place_coords = self.coords_for_placement(placement, ship_len)
@@ -2405,7 +2432,8 @@ class Board:
         for tp in ship_types:
             ship_len = Ship.data[tp]["length"]
             grid = np.zeros(self.target_grid.shape)
-            placements = self.all_target_placements_for_ship_type(tp)
+            placements = self.all_valid_target_placements(tp)
+            #placements = self.all_target_placements_for_ship_type(tp)
             for p in placements:
                 for coord in self.coords_for_placement(p, ship_len):
                     grid[coord] += 1
@@ -2416,9 +2444,189 @@ class Board:
                 out += grid_by_ship[k]
             return out
         return grid_by_ship
-
     
-#%% Ship Class
+    
+    
+    
+    # More targeting methods (in development)
+    def find_hits(self, unresolved=False):
+        """
+        Returns the set of all coordinates on the target grid that have a hit 
+
+        Parameters
+        ----------
+        unresolved : Bool
+            If True, hit spaces that can be assigned to a definite ship type
+            will not be returned; only those hits that are on an unknown
+            type of ship will be returned. Since ship type is revealed when
+            a ship is sunk (and adjacent hits can then often--though not 
+            always--be logically assigned to the same type of ship), setting
+            unresolved to True will usually get hits that still have adjacent
+            spaces with ship slots that have not yet been targeted.
+        
+        Returns
+        -------
+        hits : set
+            All coordinates with a hit on the target grid.
+
+        """
+        if unresolved:
+            rows,cols = np.where(self.target_grid == TargetValue.HIT)
+        else:
+            rows,cols = np.where(np.round(self.target_grid) >= TargetValue.HIT)
+        return set(zip(rows,cols))
+    
+    # # *** this does the same thing as targets_around(coord, untargeted=True) 
+    # def targets_around_coord(self, coord):
+    #     """
+    #     Returns a list of coordinates that are directly adjacent to the input
+    #     coord that can be targeted; i.e., spaces that have not yet been
+    #     targeted and therefore do not contain a red or white peg.
+
+    #     Parameters
+    #     ----------
+    #     board : Board
+    #         The board on which the targets are to be found. The returned
+    #         targets are based on the state of the board's target_grid.
+    #     coord : tuple
+    #         A tuple containing the (row,col) around which targets are desired.
+
+    #     Returns
+    #     -------
+    #     targets : list
+    #         List of coordinate tuples around the input coord that contain 
+    #         valid spaces to target.
+
+    #     """
+    #     coord = Coord(coord[0],coord[1])
+    #     targets = [coord + (1,0), coord + (0,1), 
+    #                coord + (-1,0), coord + (0,-1)]
+    #     targets = [tuple(target) for target in targets 
+    #                if self.is_valid_coord([target])]
+    #     targets = [target for target in targets 
+    #                if self.target_grid[target] == TargetValue.UNKNOWN]
+    #     return targets
+    
+    def targets_around_hits(self, unresolved=False, prefer_colinear=False):
+        """
+        Returns a set of all untargeted coordinates around spaces with hits.
+
+        Parameters
+        ----------
+        unresolved : Bool, optional
+            If True, hit spaces that can be assigned to a definite ship type
+            will not be included when searching for viable target spaces.
+            Only those untargeted spaces around hits that are on an unknown 
+            type of ship will be returned. The default is False.
+
+        prefer_colinear : Bool, optional
+            If True, when a hit has any other hits adjacent to it, only
+            untargeted spaces that are in-line with two or more hits will be
+            returned.
+            
+            For example, in the following scenario, let "-" mean untargeted,
+                "X" mean hit, and "O" mean miss. 
+                
+                    1 2 3 4 5 
+                  A - - - - - 
+                  B - X X X - 
+                  C - - - - - 
+            
+            Since all of the hits (X's) at B2 through B4 have at least one 
+            adjacent hit, a target space will only be returned if it forms a 
+            line with an adjacent hit and one of that hit's neighbors. 
+            B1 will be included because it lines up with the hits at B2 and B3,
+            but A2 will not be because the hit at B2 forms a line with B3,
+            but not with C2 (at least, not a known line). Therefore
+            targets_around_hits(prefer_colinear=True) will return B1 and B5
+            for this board.
+                
+            If prefer_colinear is False, then every "-" space surrounding each
+            of the hits ("X") will be returned: A2, A3, A4, B1, B5, C2, C3, C5.
+            
+            If a hit forms multiple lines, as in the following layout, then 
+            spaces that line-up with either line are valid:
+                
+                    1 2 3 4  
+                  A - - - - 
+                  B - X X - 
+                  C - X - - 
+                  D - - - - 
+            
+            In this case, A2, B1, B4, and D2 would be returned.
+              
+        Returns
+        -------
+        targets : set
+            The set of target coordinates that are adjacent to all of the
+            hits on the board and have not yet been targeted.
+
+        """
+        hits = self.find_hits(unresolved=unresolved)
+        targets = set()
+        for hit in hits:
+            for coord in self.targets_around(hit, untargeted=True):
+                if prefer_colinear:
+                    if self.is_colinear_with_hits(coord, hit):
+                        targets.add(coord)
+                    else:
+                        pass
+                else:
+                    targets.add(coord)
+        return targets
+        
+    def is_colinear_with_hits(self, target, hit):
+        """
+        Determines if the input target coordinate is colinear with the input
+        hit and and other hits that are adjacent to that hit.
+        
+        Colinear in this case means that if the input hit has one or more
+        adjacent spaces with a hit, then the target is considered colinear
+        if it falls in the same column/row as the column/row of the hit and
+        adjacent hit, and is also adjacent to the input hit.
+        
+        As an example, if ? is the target space, X is the input hit, and 
+        x are other hits (- is unknown), then ? is colinear in the scenario
+        on the left, but not on the right.
+        
+            COLINEAR        NOT COLINEAR
+            - ? X x -       - ? X - 
+            - - - - -       - - x - 
+            
+        If the input hit has no adjacent hits, then the target coordinate is
+        always considered colinear (i.e., it forms a line with the hit of 
+        length 2).
+
+        Parameters
+        ----------
+        target : tuple (row,col)
+            The target coordinate. Method returns True if this coordinate is
+            colinear with the input hit and any adjacent hits.
+        hit : tuple (row,col)
+            The coordinates of a hit that is adjacent to target.
+
+        Returns
+        -------
+        colinear : Bool
+            True if target is in-line with hit and at least one of hit's 
+            adjacent hits, or if hit has no adjacent hits.
+            False if target does not form a line with hit and any of hit's 
+            adjacent hits.
+
+        """
+        adjacents = self.coords_around(hit)
+        if target not in adjacents:
+            raise ValueError("Target coordinate is not adjacent to hit.")
+        adjacent_hits = [a for a in adjacents 
+                         if self.target_grid[a[0],a[1]] >= TargetValue.HIT]
+        ds = np.array(adjacent_hits) - np.tile(np.array(hit), 
+                                               (len(adjacent_hits),1))
+        dtarget = np.array((target[0] - hit[0], target[1] - hit[1]))
+        colinear = np.any((ds == -dtarget).all(axis=1))
+        return colinear
+    
+    
+ #%% Ship Class
 class Ship:
     
     _data = {ShipType.PATROL: {"name": "Patrol".title(), "length": 2},
