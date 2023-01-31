@@ -1,50 +1,66 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Thu Sep  1 23:21:42 2022
+Created on Wed Jan 25 17:06:57 2023
 
 @author: jason
 """
 
-#%% Imports
+"""
+A Defense object takes the following inputs:
+    formation       A string description of the preferred ship arrangement.
+                    'cluster(ed)', 'isolate(d)', or 'random'.
+                    'clutered' prefers ship placements that are as close as 
+                    possible, without violating the buffer & alignment settings
+                    (below).
+                    'isolated' prefers placements that are as far as possible,
+                    without violating buffer & alignment settings.
+                    'random' choses ship placements that satisfy alignment and
+                    buffer settings, but are otherwise equally likely.
+    method          A string that describes how placements are chosen; 
+                    'optimize' selects that placement that best satisfies the 
+                    formation (farthest away from existing ships for 'isolated'
+                    formation, closest for 'clustered' formation, random for
+                    'random' formation). 
+                    'weighted' selects a placement for each ship based on how
+                    far it is from existing ships (closer is better for 
+                    'clustered' formation, farther is better for 'isolated').
+                    'any' selects one of the valid placements with equal 
+                    probability. For 'clustered', ony placements that are 
+                    exactly ship_buffer away from another ship are considered 
+                    valid.
+                    The default is 'weighted'.
+    edge_buffer     The number of spaces that must be left between a ship and
+                    the edge of the board. Default is 0.
+    ship_buffer     The minimum number of spaces that must be left between any
+                    two slots on any two ships. Default is 0 (i.e., ships can 
+                    be right against one another).
+    fleet_alignment An IntENum that indicates whether ships must be aligned 
+                    vertically, horizontally, or both.
+    
+It should implement these methods:
+    fleet_placements (returns dict of dicts)
+"""
 
+#%% Imports
 import abc
 import numpy as np
 
-from battleship import (SHIP_DATA, MAX_ITER, Align, ShipType,
-                        Ship, Board, Coord, random_choice)
+from battleship import (MAX_ITER, Align, ShipType, Placement,
+                        Ship, Board, random_choice)
     
+
 #%% Constants
 _RANDOMIZE_SHIP_PLACEMENT_ORDER = True
 
-#%% Defensive Strategy
-class Defense(metaclass=abc.ABCMeta):    
-    """
-    All Defense instances must implement the following attributes and methods:
-    
-    Abstract Properties/Methods:
-    - fleet_placements
-    
-    Properties
-    - fleet_alignment
-    - edges
-    
-    Other methods
-    - __init__
-    
-    Class methods
-    - from_strs
-    """
+#%% Class Definition
+
+class Defense(metaclass=abc.ABCMeta):   
     
     ### Initializer ###
     
     def __init__(self, alignment=None, edges=True):
         """
-        An instance of a Defense subclass should not actually place ships
-        on the board; that is the role of a Player object.
-        Likewise, an Offense should not fire a shot or update the board,
-        it should just provide targets; the Player instance is the object
-        that actually interacts with the Board object.
 
         Parameters
         ----------
@@ -66,8 +82,7 @@ class Defense(metaclass=abc.ABCMeta):
         None.
 
         """
-        self.fleet_alignment = alignment
-        self.edges = edges
+        pass
         
     def __repr__(self):
         return f"Defense({self.fleet_alignment}, {self.edges})"
@@ -76,60 +91,14 @@ class Defense(metaclass=abc.ABCMeta):
     
     @abc.abstractmethod
     def placement_for_ship(self, board, ship_type):
+        """
+        This method is called by fleet_placements (a method of Defense,
+        not a subclass) and should return that placement of the input ship
+        on the input board.
+        """
         pass
     
-    ### Properties ###
-    @property
-    def fleet_alignment(self):
-        return self._fleet_alignment
-    
-    @fleet_alignment.setter
-    def fleet_alignment(self, align):
-        if align == None or align.upper() == "ANY":
-            self._fleet_alignment = Align.ANY
-        elif align.upper() in ["VERTICAL", "NS", "N-S", "N/S", 
-                       "NORTH-SOUTH", "NORTH/SOUTH"]:
-            self._fleet_alignment = Align.VERTICAL
-        elif align.upper() in ["HORIZONTAL", "EW", "E-W", "E/W", 
-                       "EAST-WEST", "EAST/WEST"]:
-            self._fleet_alignment = Align.HORIZONTAL
-        else:
-            raise ValueError("Alignment must be 'horizontal' or 'vertical', "
-                             "or equivalent directions (NS, EW, etc.)")
-        
-    @property
-    def edges(self):
-        return self._edges
-    
-    @edges.setter
-    def edges(self, value):
-        self._edges = (value == True)
-        
-    ### Class factory method ###
-    
-    # @classmethod
-    # def from_strs(cls, def_type, **kwargs):
-    #     """
-    #     Allowable def_types are:
-    #         "random"
-            
-    #     Other parameters can be entered by keyword:
-    #         align = 'horizontal' or 'vertical' (or 'any', the default)
-    #         diagonal = True / False (Isolated Strategy only)
-    #         max_sep = True / False (Isolated Strategy only)
-    #         separation = integer 
-            
-    #     """
-    #     if def_type == None or def_type.lower() == "random":
-    #         return RandomDefense(**kwargs)
-    #     else:
-    #         raise ValueError("Invalid method string.")
-            
-    @classmethod
-    def random(cls, weight=None, alignment=None, edges=True, **kwargs):
-        return RandomDefense(weight, alignment, edges, **kwargs)
-        
-    ### Other methods ###
+    ### Concrete Methods ###
     
     def fleet_placements(self, board):
         """Return a dictionary of placements for each ship type. Each value 
@@ -142,47 +111,31 @@ class Defense(metaclass=abc.ABCMeta):
         # create a temporary copy of board to record placements as they are
         # are generated (to avoid invalid positions).
         newboard = Board()
-        nships = len(SHIP_DATA)
+        nships = len(Ship.data)
         ship_order = range(1, nships+1)
-        
-        # ok = False
-        # count = 0
-        # while not ok and count <= MAX_ITER:
-        #     newboard = Board(board.size)
-        #     if _RANDOMIZE_SHIP_PLACEMENT_ORDER:
-        #         ship_order = np.random.choice(ship_order, nships, replace=False)
-        #     for ship_type in ship_order:
-        #         coord, heading = self.placement_for_ship(newboard, ship_type)
-        #         ok = (coord != None and heading != None)
-        #         if ok:
-        #             placements[ship_type] = {"coord": coord, "heading": heading}
-        #             newboard.place_ship(ship_type, coord, heading)
-        #     count += 1
-        # if count == MAX_ITER:
-        #     raise Exception("Maximum iterations reached while finding ship "
-        #                     "placements.")
-        # return placements
-            
             
         if _RANDOMIZE_SHIP_PLACEMENT_ORDER:
             ship_order = [int(x) for x in 
                           np.random.choice(ship_order, nships, replace=False)]
             
         for ship_type in ship_order:
-            coord, heading = self.placement_for_ship(newboard, ship_type)
+            placement = self.placement_for_ship(newboard, ship_type)
             count = 0
-            while coord == None and heading == None and count <= MAX_ITER:
-                coord, heading = self.placement_for_ship(newboard, ship_type) 
+            while (placement.coord == None 
+                   and placement.heading == None 
+                   and count <= MAX_ITER):
+                placement = self.placement_for_ship(newboard, ship_type) 
                 count += 1
-            if coord == None or heading == None:
+            if placement.coord == None or placement.heading == None:
                 raise Exception(f"No valid locations found for "
-                                f"{SHIP_DATA[ShipType(ship_type)]['name']}")                    
-            if not newboard.is_valid_ship_placement(ship_type, coord, heading):
+                                f"{Ship.data[ShipType(ship_type)]['name']}")                    
+            if not newboard.is_valid_placement(placement):
                 raise Exception(f"Cannot place "
-                                f"{SHIP_DATA[ShipType(ship_type)]['name']} "
-                                f"at {coord} with heading {heading}.")
-            placements[ship_type] = {"coord": coord, "heading": heading}
-            newboard.place_ship(ship_type, coord, heading)
+                                f"{Ship.data[ShipType(ship_type)]['name']} "
+                                f"at {placement.coord} with heading "
+                                f"{placement.heading}.")
+            placements[ship_type] = placement
+            newboard.add_ship(ship_type, placement.coord, placement.heading)
         return placements
     
 #%%
@@ -199,156 +152,396 @@ class RandomDefense(Defense):
     - placement_for_ship
     """
     
-    def __init__(self, weight=None, alignment=None, edges=True, **kwargs):
+    def __init__(self, formation, method = "weighted",
+                 edge_buffer = 0, ship_buffer = 0, 
+                 alignment = Align.ANY):
         """
-        Creates an instance of RandomDefense with the indicated or default
-        parameters.
+        RandomDefense implements an algorithm for placing ships on a Battleship
+        board. Fleet arrangement can be controlled used the input parameters,
+        which weight unoccuppied spots differently when randomly selecting a 
+        placement for each ship. For example, if formation = 'cluster', ships
+        will be preferentially placed close to other ships (i.e., spaces close
+        to already-placed ships will be weighted more heavily when randomly
+        chosing a space for the next ship).
 
         Parameters
         ----------
-        weight : TYPE, optional
-            One of the following strings which determines how to weight 
-            different coordinates when choosing ship placement.
-            'flat' or 'random'      All coordinates are equally likely
-            'clustered'             Favor coordinates that are close to other 
-                                    ships.
-            'isolated'              Favor coordinates that are not adjacent
-                                    to other ships, and as far as possible
-                                    from other ships (if the 'maxsep' 
-                                    parameter is set to True)
-            The default is 'flat'.
+        formation : str
+            A string description of how the ships should be arranged on the 
+            Battleship board. All formations must adhere to the edge_buffer,
+            ship_buffer, and alignment parameters detailed below.
+            Allowable formations are:
+                'cluster' or 'clustered'
+                    Prefer ship placements that are as close as possible. 
+                    
+                    If method is 'weighted', closer placements are favored but
+                    not guaranteed. 
+                    If method is 'optimize', the closest placement will be 
+                    chosen ("closest" means the smallest sum of space-to-space 
+                    distances between all pairs of spaces on both ships). 
+                    Note that this still leads to random fleet formations 
+                    because the first ship is always placed randomly.
+                    If method is 'any', a ship placement will be chosen 
+                    randomly from among those placements that are exactly 
+                    ship_buffer away from already-placed ships (similar to 
+                    'weighted', but where weights for any placements more
+                    than ship_buffer away from existing ships are set to 0).
+                'isolate' or 'isolated'
+                    Prefer placements that are as far as possible from all
+                    already-placed ships.
+                    
+                    If method is 'weighted', farther placements are favored but
+                    not guaranteed. 
+                    If method is 'optimize', the placement that is farthest 
+                    from all existing ships will be chosen ("farthest" means 
+                    the largest sum of space-to-space distances between all 
+                    pairs of spaces on both ships). 
+                    If method is 'any', a ship placement will be chosen 
+                    randomly from among those placements that are exactly 
+                    ship_buffer away from already-placed ships (similar to 
+                    'weighted', but where weights for any placements more
+                    than ship_buffer away from existing ships are set to 0).
+                            without violating buffer & alignment settings.
+                            'random' choses ship placements that satisfy alignment and
+                            buffer settings, but are otherwise equally likely.
+                'random'
+                    Placements are randomly chosen from possible placements.
+                    
+        method : str, optional
+            A string that describes how placements are chosen. Allowable values
+            are:
+                'optimize' : Select the placement that best satisfies the 
+                            formation condition (farthest away from existing 
+                            ships for 'isolated' formation, closest for 
+                            'clustered' formation, random for 'random' 
+                            formation).  
+                            Note that this still leads to random fleet 
+                            formations because the first ship is always placed 
+                            randomly.
+                'weighted' : Select placement for each ship based on distance 
+                            to existing ships (closer is better for 'clustered' 
+                            formation, farther is better for 'isolated').            
+                'any' :     Select one of the valid placements with equal 
+                            probability. 
+                            For 'clustered', ony placements that are exactly 
+                            ship_buffer away from another ship are considered 
+                            valid. 
+            The default is 'weighted'.
             
-        alignment : str, optional
-            The alignment of all ships in the fleet. The alignment may be
-            'horizontal'/'E-W', 'vertical'/'N-S', or 'any' (default).
-        edges : Bool, optional
-        
-        Keyword Arguments
-        -----------------
-        buffer : int, optional
-            Applies only when weight = 'isolated'. The minimum spacing between
-            ships. The default is 1, meaning that there must be at least one
-            space between two ships in order for a ship placement to be 
-            considered valid (see also 'diagonal').
-        diagonal : Bool, optional
-            Applies only when weight = 'isolated'. If True, a ship placement 
-            is allowed if it touches another ship on a diagonal, but not on
-            an edge. If False, they cannot be adjacent even
-            on a diagonal. The default is True.
-        maxsep : Bool, optional 
-            Applies only when weight = 'isolated'. If True, the defense will
-            favor ship placements that are as far as possible from all other
-            ships on the board. The default is False. 
-        
+        edge_buffer : int, optional
+            The number of spaces that must be left between a ship and the edge 
+            of the board. 
+            The default is 0.
+            
+        ship_buffer : int, optional
+            The number of spaces that must be left between a ship and all other
+            ships. 
+            The default is 0.
+            
+        alignment : Align (IntEnum), optional
+            If this parameter is Align.VERTICAL or Align.HORIZONTAL, all ships
+            must be pointed in a vertical or horizontal heading, respectively
+            (i.e., a ship must occupy a single column or row, respectively). 
+            If alignment is Align.ANY, either heading is acceptable. 
+            The default is Align.ANY.
 
+        Abstract Methods implemented
+        -------
+        fleet_placements : returns dict
+            DESCRIPTION: Returns a dictionary of placements (one for each
+                ship type) based on the Defense's parameters.
+            
         Returns
         -------
         None.
 
         """
-        super().__init__(alignment, edges)
-        if weight == None:
-            self.weight = "flat"
-        else:
-            self.weight = weight
-        self.buffer = kwargs.get('buffer')
-        self.buffer = (0 if self.buffer == None else self.buffer)
-        self.diagonal = kwargs.get('diagonal')
-        self.diagonal = (True if self.diagonal == None else self.diagonal)
-        self.max_sep = kwargs.get('maxsep')
-        self.max_sep = (False if self.max_sep == None else self.max_sep)        
+        
+        super().__init__()
+        self.formation = formation
+        self.method = method
+        self.edge_buffer = edge_buffer
+        self.ship_buffer = ship_buffer
+        self.alignment = alignment     
         
     def __repr__(self):
-        r = (f"RandomDefense({self.weight!r}, {self.fleet_alignment!r}, "
-             f"{self.edges!r}")
-        if self.buffer:
-            r += f", buffer={self.buffer!r}"
-        if not self.diagonal:
-            r += f", diagonal={self.diagonal!r}"
-        if self.max_sep:
-            r += f", max_sep={self.max_sep!r}"
-        r += ")"
+        r = (f"RandomDefense({self.formation!r}, {self.method!r}, "
+             f"{self.edge_buffer!r}, {self.ship_buffer!r}, "
+             f"{self.alignment})")
         return r
-        
+    
+    def __str__(self):
+        s = (f"RandomDefense(formation={self.formation!r}, "
+             f"method={self.method!r}, "
+             f"edge_buffer={self.edge_buffer!r}, "
+             f"ship_buffer={self.ship_buffer!r}, "
+             f"alignment={self.alignment})")
+        return s
+    
+    ### Properties ###
     
     @property
-    def weight(self):
-        return self._weight
+    def formation(self):
+        return self._formation
     
-    @weight.setter
-    def weight(self, value):
+    @formation.setter
+    def formation(self, value):
         value = value.lower()
-        value = ("flat" if value in ["flat", "random"] else
+        value = ("random" if value in ["flat", "random"] else
                  "isolated" if value.startswith("isolate") else
                  "clustered" if value.startswith("cluster") else
                  None)
         if value == None:
-            raise ValueError("weight must be 'flat', 'isolated', 'clustered'.")
-        self._weight = value
-                 
-    #@abc.abstractmethod
-    def placement_for_ship(self, board, ship_type):
-        """Returns a (coord, heading) tuple for the input ship type. The
-        placement is based on the algorithm for this particular subclass of
-        Defense. In this case, the algorithm favors placements that
-        minimize the sum of distances between all coordinates of the input
-        ship to all coordinates of all other ships already on the board.
-        """
+            raise ValueError("weight must be 'random', 'isolated'/'isolate', "
+                             "or 'clustered'/'cluster'.")
+        self._formation = value
+      
+    @property
+    def method(self):
+        return self._method
+    
+    @method.setter
+    def method(self, value):
+        value = value.lower()
+        value = ("optimize" if value.startswith("optimize") else
+                 "weighted" if value in ["weight", "weighted"] else
+                 "any" if value in ["any"] else
+                 None)
+        if value == None:
+            raise ValueError("method must be 'optimize', 'weighted', or"
+                             " 'any'.")
+        self._method = value
         
-        new_ship = Ship(ship_type)
+    @property
+    def edge_buffer(self):
+        return self._edge_buffer
+    
+    @edge_buffer.setter
+    def edge_buffer(self, value):
+        if not isinstance(value, (int, np.integer)):
+            raise TypeError("Buffer must be a non-negative integer.")
+        self._edge_buffer = value
         
-        # completely random / flat
-        if self.weight == "flat":
-            all_placements = board.all_valid_ship_placements(new_ship.length,
-                alignment = self.fleet_alignment, edges = self.edges)
-            prob = np.ones(len(all_placements))
+    @property
+    def ship_buffer(self):
+        return self._ship_buffer
+    
+    @ship_buffer.setter
+    def ship_buffer(self, value):
+        if not isinstance(value, (int, np.integer)):
+            raise TypeError("Buffer must be a non-negative integer.")
+        self._ship_buffer = value
         
-        # cluster
-        elif self.weight == "clustered":
-            all_placements = board.all_valid_ship_placements(new_ship,
-                alignment = self.fleet_alignment, edges = self.edges)
-            prob = np.ones(len(all_placements))
-            for (i, place) in enumerate(all_placements):
-                if len(board.fleet) == 0:
-                    pass
-                else:
-                    ds = board.relative_coords_for_heading(place[1], new_ship.length)
-                    rows = place[0][0] + ds[0]
-                    cols = place[0][1] + ds[1]
-                    d2 = 0
-                    for (r,c) in zip(rows, cols):
-                        for other_ship in list(board.fleet.values()):
-                            other_coords = np.array(board.coord_for_ship(other_ship))
-                            delta = other_coords - np.tile((r,c), 
-                                                           (other_coords.shape[0],1))
-                            d2 += np.sum(delta**2)
-                    prob[i] = 1 / d2
-                    
-        # isolated
-        elif self.weight == "isolated":
-            all_placements = board.all_valid_ship_placements(new_ship,
-                distance = self.buffer,diagonal = self.diagonal,
-                alignment = self.fleet_alignment, edges = self.edges)
-            prob = np.ones(len(all_placements))
-            if self.max_sep:
-                for (i, place) in enumerate(all_placements):
-                    ds = board.relative_coords_for_heading(place[1], new_ship.length)
-                    rows = place[0][0] + ds[0]
-                    cols = place[0][1] + ds[1]
-                    for other_ship in list(board.fleet.values()):
-                        other_coords = np.array(board.coord_for_ship(other_ship))
-                        d2 = 0
-                        for (r,c) in zip(rows, cols):
-                            delta = (np.tile((r,c), (other_coords.shape[0],1))
-                                     - other_coords)
-                            d2 += np.sum(delta**2)
-                        prob[i] *= d2
-                if np.all(prob == 0):
-                    prob = np.ones(prob.shape)
+    @property
+    def alignment(self):
+        return self._alignment
+    
+    @alignment.setter
+    def alignment(self, alignment):
+        if isinstance(alignment, Align):
+            self._alignment = alignment
+        elif alignment == None or alignment.upper() == "ANY":
+            self._alignment = Align.ANY
+        elif alignment.upper() in ["VERTICAL", "NS", "N-S", "N/S", 
+                                   "NORTH-SOUTH", "NORTH/SOUTH"]:
+            self._alignment = Align.VERTICAL
+        elif alignment.upper() in ["HORIZONTAL", "EW", "E-W", "E/W", 
+                                   "EAST-WEST", "EAST/WEST"]:
+            self._alignment = Align.HORIZONTAL
+        else:
+            raise ValueError("Alignment must be 'horizontal', 'vertical', "
+                             "or equivalent directions (NS, EW, etc.),"
+                             "or 'any'. Or an instance of Align.")
             
-        if len(all_placements) == 0:
-            # raise ValueError("No valid ship placements are possible. Relax"
-            #                  " buffer, diagonal, or edges.")
-            all_placements = [(None,None)]
-            prob = np.array([1.])
-        return random_choice(all_placements, p=prob/np.sum(prob))
+    ### Abstract method from Defense superclass ###
+    
+    def placement_for_ship(self, board, ship_type):
+        """
+        Returns a placement dictionary for the input board and ship type.
+        The placement is based on the algorithm for the particular subclass
+        of Defense and the instance's parameters.
+
+        Parameters
+        ----------
+        board : Board
+            An instance of a Board, which may already have ships placed.
+        ship_type : ShipType (IntEnum or Int 1-5)
+            The type of ship that will be placed on board.
+
+        Returns
+        -------
+        dict
+            A dictionary with the following key/values:
+                'coord' : a (row, col) tuple
+                'heading' : 'N' (north) or 'W' (west)
+                'length' : the number of spaces the ship occupies                
+
+        """
+        possible_placements, probs = self.placement_probs(board, ship_type)
+        
+        if len(possible_placements) == 0:
+            # If no possible placements were found, return a null placement
+            possible_placements = [Placement(None, 
+                                             None, 
+                                             Ship.data[ship_type]['length'])]
+            probs = np.ones((1)) * 1.
+            
+        #print(possible_placements)
+        #print(probs)
+        print((len(possible_placements),len(probs)))
+        return random_choice(possible_placements, p=probs/np.sum(probs))
+    
+    ### Other Methods ###
+    
+    def placement_probs(self, board, ship_type):
+        """
+        Returns the viable placements and associated probabilities for placing
+        a ship of type ship_type on board.
+
+        Parameters
+        ----------
+        board : Board
+            The board on which the ship of type ship_type is to be placed.
+            This board may be empty or have some ships already placed.
+        ship_type : ShipType or IntEnum (1-5)
+            The numeric description of the type of ship to be placed.
+
+        Returns
+        -------
+        possible_placements, probs : tuple
+            possible_placements is a list of Placement objects.
+            probs is a list of probabilities associated with each of the
+            possible_placements, in order. 
+            These two lists are the same length.
+
+        """
+        # Placement will be based on formation and method parameters
+        if self.formation == "random" or len(board.fleet) == 0:
+            possible_placements = board.all_valid_ship_placements(
+                ship_type, 
+                ship_buffer = self.ship_buffer, 
+                edge_buffer = self.edge_buffer,
+                alignment = self.alignment
+                )
+            probs = np.ones(len(possible_placements))
+        elif self.formation == "isolated":
+            possible_placements, probs = self.isolated_placements(ship_type,
+                                                                  board)
+        elif self.formation == "clustered":
+            possible_placements, probs = self.clustered_placements(ship_type,
+                                                                   board)
+        
+        return possible_placements, probs
+    
+    def isolated_placements(self, ship_type, board):
+        
+        """
+        Returns all of the possible placements that conform to the defense's
+        method, edge_buffer, ship_buffer, and alignment properties, as well as
+        the corresponding probability that each placement should be chosen for 
+        the location of the input type of ship. 
+
+        Parameters
+        ----------
+        ship_type : ShipType (IntEnum or int 1-5)
+            The type of ship for which placements are desired.
+        board : Board
+            The board on which the ship is to be placed.
+
+        Returns
+        -------
+        (placements, probs) : tuple
+            A 2-element tuple. First element is a list of placement 
+            dictionaries, and the second element is a list of probabilities
+            corresponding to each placement (probs[i] is the probability 
+            corresponds to placements[i]).
+
+        """
+        placements = board.all_valid_ship_placements(
+            ship_type, 
+            ship_buffer = self.ship_buffer, 
+            edge_buffer = self.edge_buffer,
+            alignment = self.alignment
+            )
+        probs = np.ones(len(placements))
+        
+        for (idx,place) in enumerate(placements):
+            for ship_placement in board.ship_placements.values():
+                probs[idx] = place.total_dist_to_placement(ship_placement, 
+                                                           method='dist')
+        
+        if self.method == "optimize":
+            # choose the placements that are farthest away from all ships
+            idx = np.flatnonzero(probs == probs.max())
+            probs = probs[idx]
+            placements = [placements[i] for i in idx]
+        elif self.method == "any":
+            # all valid placements are equally valid, so set all probs equal
+            probs = np.ones(len(placements))
+        elif self.method == "weighted":
+            # select according to probs
+            pass
+        else:
+            raise ValueError(f"Invalid method: {self.method}")
+        
+        return placements, probs
+        
+    def clustered_placements(self, ship_type, board):
+        """
+        Returns all of the possible placements that conform to the defense's
+        method, edge_buffer, ship_buffer, and alignment properties, as well as
+        the corresponding probability that each placement should be chosen for 
+        the location of the input type of ship. 
+
+        Parameters
+        ----------
+        ship_type : ShipType (IntEnum or int 1-5)
+            The type of ship for which placements are desired.
+        board : Board
+            The board on which the ship is to be placed.
+
+        Returns
+        -------
+        (placements, probs) : tuple
+            A 2-element tuple. First element is a list of placement 
+            dictionaries, and the second element is a list of probabilities
+            corresponding to each placement (probs[i] is the probability 
+            that corresponds to placements[i]).
+
+        """
+        placements = board.all_valid_ship_placements(
+            ship_type, 
+            ship_buffer = self.ship_buffer, 
+            edge_buffer = self.edge_buffer,
+            alignment = self.alignment
+            )
+        probs = np.ones(len(placements))
+        
+        for (idx,place) in enumerate(placements):
+            for ship_placement in board.ship_placements.values():
+                probs[idx] = 1. / place.total_dist_to_placement(ship_placement, 
+                                                                method='dist2')
+        if self.method == "optimize":
+            # choose the placements that are closest to other ships
+            idx = np.flatnonzero(probs == probs.max())
+            probs = probs[idx]
+            placements = [placements[i] for i in idx]
+        elif self.method == "any":
+            # select from those placements are are exactly one ship_buffer 
+            # away from the nearest ship.
+            print(self.ship_buffer)
+            keep = []
+            for (place, p) in zip(placements, probs):
+                for ship_place in board.ship_placements.values():
+                    D = place.placement_dist_matrix(ship_place)
+                    if (D.min() - 1) == self.ship_buffer:
+                        keep += [True]
+            placements = [p for (p, k) in zip(placements, keep) if k]
+            probs = [pr for (pr, k) in zip(probs, keep) if k]
+            
+        elif self.method == "weighted":
+            pass
+        else:
+            raise ValueError(f"Invalid method: {self.method}")
+        
+        return placements, probs
