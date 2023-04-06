@@ -6,25 +6,34 @@ Created on Mon Sep 19 21:31:10 2022
 @author: jason
 """
 
-import numpy as np
+from collections import Counter
 import matplotlib as mpl
 from matplotlib import pyplot as plt
+import numpy as np
+import time
 
 from battleship import constants
 #from battleship.board import Board
+#from battleship.player import AIPlayer
 from battleship.ship import Ship
+
+#%% Viz Class Definition
 
 class Viz:
     
     bg_color = "#202020"
     ship_outline_color = "#202020"
-    peg_outline_color = "#202020"
+    #peg_outline_color = "#202020"
+    peg_outline_color = None
     ship_color = "darkgray"
     target_color = "yellow"
     ocean_color = 'tab:blue' #cadetblue
     miss_color = "whitesmoke"
     hit_color = "tab:red" #"firebrick"
     peg_radius = 0.3
+    
+    
+### "Private" Methods ###
     
     @staticmethod
     def _pegs(xy, color, edgecolor=None):
@@ -52,6 +61,56 @@ class Viz:
             edgecolor = Viz.peg_outline_color
         return [plt.Circle(col_row, radius=Viz.peg_radius, facecolor=color,
                     edgecolor=edgecolor) for col_row in xy]
+    
+    @staticmethod
+    def _format_axes(ax, board_size):
+        """
+        Applies standardized formatting to the input axes object.
+
+        Parameters
+        ----------
+        ax : pyplot axes
+            An axes to be formatted.
+        board_size : int
+            The size of the board that is plotted on ax.
+
+        Returns
+        -------
+        None.
+
+        """
+        label_color = "lightgray"
+        grid_color = "gray"
+        axis_color = "lightgray"
+        ocean_color = 'tab:blue' #cadetblue
+        
+        # grid lines
+        ax.set_facecolor(ocean_color)
+        ax.set_xticks(np.arange(1,11), minor=False)
+        ax.set_xticks(np.arange(0.5,11), minor=True)        
+        ax.set_yticks(np.arange(1,11), minor=False)            
+        ax.set_yticks(np.arange(0.5,11), minor=True)
+        for spine in ax.spines.values():
+            spine.set_color(axis_color)
+        ax.xaxis.grid(False, which='major')
+        ax.xaxis.grid(True, which='minor', color=grid_color, 
+                      linestyle=':', linewidth=0.5, )
+        ax.yaxis.grid(False, which='major')
+        ax.yaxis.grid(True, which='minor', color=grid_color, 
+                      linestyle=':', linewidth=0.5)
+        ax.set_xticklabels([""]*(board_size+1), minor=True)
+        ax.set_xticklabels([str(n) for n in range(1,board_size+1)], 
+                           minor=False, color=label_color)            
+        ax.set_yticklabels([""]*(board_size+1), minor=True)
+        ax.set_yticklabels([chr(65+i) for i in range(board_size)], 
+                           minor=False, color=label_color) 
+        ax.xaxis.tick_top()
+        ax.tick_params(color = 'lightgray')
+        ax.tick_params(which='minor', length=0)
+        ax.set_aspect('equal')
+        
+        
+### "Public" Methods ###
     
     @staticmethod
     def show_player(player, show_possible_targets=True):
@@ -93,18 +152,28 @@ class Viz:
                              == constants.TargetValue.MISS)
         for p in Viz._pegs(zip(cols+1,rows+1), Viz.miss_color):
             axs[0].add_patch(p)
-        rows,cols = np.where(player.board.target_grid 
-                             == constants.TargetValue.HIT)
+        rows,cols = np.where((player.board.target_grid 
+                              >= constants.TargetValue.HIT))
         for p in Viz._pegs(zip(cols+1,rows+1), Viz.hit_color):
-            axs[0].add_patch(p)           
-        if (show_possible_targets and 
-                getattr(player.offense,'possible_targets', False)):
-            cols_rows = [(c+1,r+1) for (r,c) in player.offense.possible_targets]
-            for p in Viz._pegs(cols_rows, None, Viz.target_color):
-                axs[0].add_patch(p)
+            axs[0].add_patch(p)    
+            
+        # Add the possible target locations to the target grid
+        if show_possible_targets:
+            if player.offense.target_probs:
+                cols_rows = [(c+1,r+1) for (r,c) in player.offense.target_probs]
+                for p in Viz._pegs(cols_rows, None, Viz.target_color):
+                    axs[0].add_patch(p)
             col_row = (player.last_target[1]+1, player.last_target[0]+1)
-            axs[0].add_patch(Viz._pegs([col_row], None, "purple")[0])
-                
+            shot_color = (Viz.hit_color if 
+                          player.board.target_grid[player.last_target] >= 0.
+                          else Viz.miss_color)
+            # add a special circle over the actual shot location
+            axs[0].add_patch(plt.Circle(col_row,
+                                        radius=Viz.peg_radius,
+                                        facecolor = shot_color,
+                                        edgecolor = "magenta",
+                                        linewidth = 3.0))
+            
         axs[1].imshow(np.zeros(player.board.target_grid.shape), cmap=colmap, 
                       extent=grid_extent)        
         # add pegs to ships
@@ -156,7 +225,16 @@ class Viz:
             grid = ["target", "ocean"]
         else:
             grid = [grid.lower()]
-        if (grid[0] not in ["target", "ocean"] or 
+        if grid[0] == "t":
+            grid[0] = "target"
+        elif grid[0] == "o":
+            grid[0] = "ocean"
+        if grid[-1] == "t":
+            grid[-1] = "target"
+        elif grid[-1] == "o":
+            grid[-1] = "ocean"
+        if (grid[
+                0] not in ["target", "ocean"] or 
                 grid[-1] not in ["target", "ocean"]):
             raise ValueError("grid must be 'target', 'ocean', "
                              "or 'both' (default).")    
@@ -169,7 +247,7 @@ class Viz:
             Viz._format_axes(ax, board.size)
 
         if "target" in grid:
-            Viz.add_target_grid(axs[0], board)
+            Viz.add_target_grid(axs[0][0], board)
             if possible_targets:
                 for t in possible_targets:
                     axs[0].add_patch(
@@ -179,7 +257,7 @@ class Viz:
                         )
                         
         if "ocean" in grid:
-            Viz.add_ocean_grid(axs[-1], board)
+            Viz.add_ocean_grid(axs[-1][0], board)
                 
         fig.set_facecolor(Viz.bg_color)
         return fig
@@ -253,53 +331,102 @@ class Viz:
         fig.set_facecolor(Viz.bg_color)
         return fig
     
-    
     @staticmethod
-    def _format_axes(ax, board_size):
+    def show_replay(game):
+        history1 = game.player1.outcome_history
+        history2 = game.player2.outcome_history
+        board1 = game.player1.board
+        board2 = game.player2.board
+        
+        # This is what we'd really like to do, but it creates circular refs
+        # because of the call to Viz in Board.show2:
+        # new_board1 = Board(board1.size)
+        # new_board2 = Board(board2.size)
+        # Here is a workaround:
+        new_board1 = board1.copy()
+        new_board2 = board2.copy()
+        new_board1.__init__(board1.size)
+        new_board2.__init__(board2.size)
+        
+        new_board1.add_fleet(board1.ship_placements)
+        new_board2.add_fleet(board2.ship_placements)
+        
+        # Another workaround for the commented-out code:
+        # new_player1 = AIPlayer(name=game.player2.name)
+        # new_player1.board = new_board1
+        # new_player2 = AIPlayer(name=game.player1.name)
+        # new_player2.board = new_board2
+        new_player1 = game.player1.dumb_copy()
+        new_player1.__init__(name=game.player1.name, board_size=new_board1.size)
+        new_player2 = game.player2.dumb_copy()
+        new_player2.__init__(name=game.player2.name, board_size=new_board2.size)
+        
+        new_player1.opponent = new_player2
+        
+        if game.game_result['first_move'] == 1:
+            first_player = new_player1
+            second_player = new_player2
+            first_history = history1
+            second_history = history2
+        elif game.game_result['first_move'] == 2:
+            first_player = new_player2
+            second_player = new_player1
+            first_history = history2
+            second_history = history1
+        else:
+            raise ValueError("first_move should be 1 or 2.")
+            
+        for turn in range(game.game_result['turn_count']):
+            first_player.fire_at_target(first_history[turn]['coord'])
+            second_player.fire_at_target(second_history[turn]['coord'])
+            Viz.show_boards(first_player.board, 
+                            second_player.board, 
+                            grid="both")
+            plt.draw()
+            #input(f"Turn {turn+1} of {game.game_result['turn_count']}. "
+            #      f"Press Enter to continue.")
+            time.sleep(0.5)
+        plt.show()
+       
+        
+    @staticmethod
+    def show_player_history(player):
         """
-        Applies standardized formatting to the input axes object.
+        Shows the incoming and outgoing shot history of the player, with 
+        each hit/miss on the target board annotated with the turn in which it 
+        occurred.
 
         Parameters
         ----------
-        ax : pyplot axes
-            An axes to be formatted.
-        board_size : int
-            The size of the board that is plotted on ax.
+        player : Player
+            The player whose history will be shown.
 
         Returns
         -------
-        None.
+        fig : matplotlib.figure.Figure
+            The figure to display.
 
         """
-        label_color = "lightgray"
-        grid_color = "gray"
-        axis_color = "lightgray"
-        ocean_color = 'tab:blue' #cadetblue
+        fig = Viz.show_board(player.board)
+        axs = fig.axes
+        ax = axs[0]
+        text_color = {'hit': 'white', 'miss': 'black', 'sink': 'black'}
         
-        # grid lines
-        ax.set_facecolor(ocean_color)
-        ax.set_xticks(np.arange(1,11), minor=False)
-        ax.set_xticks(np.arange(0.5,11), minor=True)        
-        ax.set_yticks(np.arange(1,11), minor=False)            
-        ax.set_yticks(np.arange(0.5,11), minor=True)
-        for spine in ax.spines.values():
-            spine.set_color(axis_color)
-        ax.xaxis.grid(False, which='major')
-        ax.xaxis.grid(True, which='minor', color=grid_color, 
-                      linestyle=':', linewidth=0.5, )
-        ax.yaxis.grid(False, which='major')
-        ax.yaxis.grid(True, which='minor', color=grid_color, 
-                      linestyle=':', linewidth=0.5)
-        ax.set_xticklabels([""]*(board_size+1), minor=True)
-        ax.set_xticklabels([str(n) for n in range(1,board_size+1)], 
-                           minor=False, color=label_color)            
-        ax.set_yticklabels([""]*(board_size+1), minor=True)
-        ax.set_yticklabels([chr(65+i) for i in range(board_size)], 
-                           minor=False, color=label_color) 
-        ax.xaxis.tick_top()
-        ax.tick_params(color = 'lightgray')
-        ax.tick_params(which='minor', length=0)
-        ax.set_aspect('equal')
+        for (turn, outcome) in enumerate(player.outcome_history):
+            coord = outcome['coord']
+            x = coord[1] + 1.
+            y = coord[0] + 1.
+            result = ('sink' if outcome['sunk'] 
+                      else 'hit' if outcome['hit']
+                      else 'miss')
+            ax.text(x, y + 0.02, f"{turn + 1}", 
+                    color = text_color[result],
+                    fontsize = 'x-small',
+                    fontweight = 'normal',
+                    horizontalalignment = 'center',
+                    verticalalignment = 'center')
+        
+        return fig
         
         
     @staticmethod
@@ -750,3 +877,390 @@ class Viz:
         Viz._format_axes(ax, board_size)
         ax.imshow(grid, extent=grid_extent)
         fig.set_facecolor(Viz.bg_color)
+        
+        
+    @staticmethod
+    def plot_results_summary(results):
+        """
+        Shows a 3x3 grid of plots with statistical summaries of the game 
+        results (dicts) contained in the results parameter.
+
+        Parameters
+        ----------
+        results : list
+            A list of dictionaries, each of which should contain the following
+            keys:
+                'winner' :              Player instance (or None if a tie)
+                'loser' :               Player instance (or None if a tie)
+                'tie' :                 Bool, true if game was a tie
+                'first_move':           int, 1 or 2
+                'player1' :             The game's first player (not 
+                                        necessarily the one that went first)
+                'player2' :             The game's second player (not 
+                                        necessarily the one that went second)
+                'turn_count' :          int, the number of turns played
+                'max_turns' :           int, the max # of turns allowed
+                'game_id' :             An int or string identifying the game
+                'duration' :            The time in seconds that elapsed while
+                                        the game was played
+                'player2_stats' :       A dictionary with statistics for 
+                                        player 2. Keys are 'nshots', 
+                                        'hits', 'ships_sank', 'shots_mean', 
+                                        'shots_var', 'ships_mean', 'ships_var'.
+                'player2_stats' :       See above, but for player 2.
+                
+            Properly formatted dictionaries are stored in a Game instance's
+            'game_results' property.
+
+        Returns
+        -------
+        None
+        
+        """
+        plot_colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+        p1_color = plot_colors[0]
+        p2_color = plot_colors[1]
+        tie_color = plot_colors[4]
+        
+        winner = []         # the winner (1 for player1, 2 for player2, 0 for tie)
+        nshots = []         # the # of shots taken
+        hits_percent = []   # the % of shots that were a hit
+        ships_var = []      # the variance in distance between ships
+        loser_sinks = []    # the ships sunk by the loser (ngames x 5; [n,i] is True if ship i in game n was sunk, False otherwise)
+        p1_sinks = []
+        p2_sinks = []
+        
+        for result in results:
+            stats1 = result['player1_stats']
+            stats2 = result['player2_stats']
+            
+            winner += [1 if result['winner'] == result['player1']
+                       else 2 if result['winner'] == result['player2']
+                       else 0]
+            nshots += [(stats1['nshots'],
+                        stats2['nshots'])]
+            hits_percent += [(np.mean(stats1['hits']),
+                              np.mean(stats2['hits']))]
+            ships_var += [(stats1['ships_var'],
+                           stats2['ships_var'])]
+            loser_stats = (stats1 if result['loser'] is result['player1']
+                           else stats2 if result['loser'] is result['player2']
+                           else None)
+            sinks = np.zeros(5, dtype=bool)
+            
+            if loser_stats:
+                if (len(loser_stats['ships_sank']) > 0):
+                    sinks[loser_stats['ships_sank'] - 1] = True
+            loser_sinks += [sinks]
+            
+            sinks = np.zeros(5, dtype=bool)
+            if len(stats1['ships_sank']) > 0:
+                sinks[stats1['ships_sank'] - 1] = True
+            p1_sinks += [sinks]
+            
+            sinks = np.zeros(5, dtype=bool)
+            if len(stats2['ships_sank']) > 0:
+                sinks[stats2['ships_sank'] - 1] = True
+            p2_sinks += [sinks]
+            
+            
+        winner = np.array(winner)
+        nshots = np.array(nshots)
+        hits_percent = np.array(hits_percent)
+        ships_var = np.array(ships_var)
+        loser_sinks = np.array(loser_sinks)
+        p1_sinks = np.array(p1_sinks)
+        p2_sinks = np.array(p2_sinks)
+        
+        turn_count = np.array([r['turn_count'] for r in results])
+        duration = np.array([r['duration'] for r in results])
+        
+        fig, axs = plt.subplots(4, 3, figsize = (12,12))
+        
+        # Upper Left
+        pos = (0,0)
+        #axs[pos].plot(winner)
+        p1_wins = sum(winner == 1)
+        p2_wins = sum(winner == 2)
+        ties = sum(winner == 0)
+        player_names = [results[-1]['player1'].name, 
+                        'Tie', 
+                        results[-1]['player2'].name]
+        offset = max((p1_wins, p2_wins, ties)) * 0.02
+        axs[pos].bar(player_names, 
+                     [p1_wins, ties, p2_wins],
+                     color = [p1_color, tie_color, p2_color])
+        axs[pos].set_title('Winner')
+        axs[pos].text(-0.35, p1_wins - offset,
+                      f"{p1_wins / len(results) * 100:.1f}%\n",
+                      verticalalignment='top', color='white')
+        axs[pos].text(1.65, p2_wins - offset,
+                      f"{p2_wins / len(results) * 100:.1f}%\n",
+                      verticalalignment='top', color='white')
+        axs[pos].text(0.65, ties,
+                      f"{ties / len(results) * 100:.1f}%",
+                      verticalalignment='bottom')
+        
+        # Upper Middle
+        pos = (0,1)
+        round_to = 10
+        nbins = 20
+        bins = (np.floor(turn_count.min()/round_to) * round_to,
+                np.ceil(turn_count.max()/round_to) * round_to)
+        bins = np.arange(bins[0], bins[1], (bins[1]-bins[0])/(nbins+1))
+                         
+        axs[pos].hist(turn_count, bins, color='gray', alpha=0.7)
+        axs[pos].hist(turn_count[winner==1], bins, color=p1_color, alpha=0.7)
+        axs[pos].hist(turn_count[winner==2], bins, color=p2_color, alpha=0.7)
+        axs[pos].set_title('Turn Count')
+        xlim = axs[pos].get_xlim()
+        ylim = axs[pos].get_ylim()
+        axs[pos].text(min(xlim) + np.diff(xlim) * 0.02, 
+                      max(ylim) - np.diff(ylim) * 0.02,
+                      f"{np.mean(turn_count):.1f} +/- {np.std(turn_count):.1f}\n"
+                      f"Min: {turn_count.min()}\n"
+                      f"Median: {np.median(turn_count):.1f}\n"
+                      f"Max: {turn_count.max()}",
+                      verticalalignment = "top")
+        
+        # Upper Right
+        pos = (0,2)
+        axs[pos].hist(duration)
+        axs[pos].set_title('Duration (seconds)')
+        xlim = axs[pos].get_xlim()
+        ylim = axs[pos].get_ylim()
+        axs[pos].text(min(xlim) + np.diff(xlim) * 0.02, 
+                      max(ylim) - np.diff(ylim) * 0.02,
+                      f"{np.mean(duration):.2f} +/- {np.std(duration):.2f}\n"
+                      f"Min: {duration.min():.2f}\n"
+                      f"Median: {np.median(duration):.2f}\n"
+                      f"Max: {duration.max():.2f}",
+                      verticalalignment = "top")
+        
+    
+        
+        # Middle Left
+        pos = (1,0)
+        h1 = axs[pos].plot(np.arange(1,6), np.mean(p1_sinks, axis=0),
+                           'o')[0]
+        axs[pos].plot(np.arange(1,6), np.mean(p1_sinks[winner==2,:],axis=0),
+                           'v', color=h1.get_c())
+        h2 = axs[pos].plot(np.arange(1,6), np.mean(p2_sinks, axis=0),
+                           'o')[0]
+        axs[pos].plot(np.arange(1,6), np.mean(p2_sinks[winner==1,:],axis=0),
+                           'v', color=h2.get_c())
+                      
+        axs[pos].set_title('Ships Sank')
+        axs[pos].set_xticklabels(['None', 'Patrol', 'Dest', 
+                                  'Sub', 'Bship', 'Carrier'],
+                                 rotation = 45, fontsize=8)
+        axs[pos].legend(['All games', 'Losses only'], fontsize=10)
+        
+        # Middle Middle
+        pos = (1,1)
+        axs[pos].hist(np.sum(loser_sinks, axis=1), 
+                      bins = np.array((0,1,2,3,4,5,6)) - 0.5)
+        axs[pos].set_xticks((0,1,2,3,4,5))
+        axs[pos].set_title('# Ships Sunk by Loser')
+        xlim = axs[pos].get_xlim()
+        ylim = axs[pos].get_ylim()
+        # axs[pos].text(min(xlim) + np.diff(xlim) * 0.02, 
+        #               max(ylim) - np.diff(ylim) * 0.02,
+        #               f"{np.mean(duration):.2f} +/- {np.std(duration):.2f}\n"
+        #               f"Min: {duration.min():.2f}\n"
+        #               f"Median: {np.median(duration):.2f}\n"
+        #               f"Max: {duration.max():.2f}",
+        #               verticalalignment = "top")
+        
+        # Middle Right
+        games_per_group = 10
+        # number of experiments, games per experiment
+        grouping = (int(len(results) / games_per_group), games_per_group)     
+        
+        win_matrix = winner.reshape(grouping)
+        p1_wins = np.sum(win_matrix == 1, axis=1)
+        p2_wins = np.sum(win_matrix == 2, axis=1)
+        pos = (1,2)
+        axs[pos].hist(p1_wins, bins = np.arange(grouping[1]+1), alpha=0.7)
+        axs[pos].hist(p2_wins, bins = np.arange(grouping[1]+1), alpha=0.7)
+        axs[pos].set_title(f"Wins per {grouping[1]} games")
+        xlim = axs[pos].get_xlim()
+        ylim = axs[pos].get_ylim()
+        
+        # Lower Left
+        pos = (2,0)
+        turns_btwn_hits_1 = []
+        turns_btwn_hits_2 = []
+        for result in results:
+            hits1 = result['player1_stats']['hits']
+            hits2 = result['player2_stats']['hits']
+            turns_btwn_hits_1 += list(np.diff(np.flatnonzero(hits1 == True)))
+            turns_btwn_hits_2 += list(np.diff(np.flatnonzero(hits2 == True)))
+           
+        axs[pos].hist(turns_btwn_hits_1, 
+                      bins = np.arange(grouping[1]+1), alpha=0.7, density=True)
+        axs[pos].hist(turns_btwn_hits_2, 
+                      bins = np.arange(grouping[1]+1), alpha=0.7, density=True)
+        axs[pos].set_title("Turns between hits")
+        
+        xlim = axs[pos].get_xlim()
+        ylim = axs[pos].get_ylim()
+        axs[pos].text(max(xlim) - np.diff(xlim) * 0.02, 
+                      max(ylim) - np.diff(ylim) * 0.02,
+                      f"{results[-1]['player1'].name}\n"
+                      f"{np.mean(turns_btwn_hits_1):.1f} +/- "
+                      f"{np.std(turns_btwn_hits_1):.1f}\n"
+                      f"Min: {min(turns_btwn_hits_1)}\n"
+                      f"Median: {np.median(turns_btwn_hits_1):.1f}\n"
+                      f"Max: {max(turns_btwn_hits_1)}\n"
+                      "\n"
+                      f"{results[-1]['player2'].name}\n"
+                      f"{np.mean(turns_btwn_hits_2):.1f} +/- "
+                      f"{np.std(turns_btwn_hits_2):.1f}\n"
+                      f"Min: {min(turns_btwn_hits_2)}\n"
+                      f"Median: {np.median(turns_btwn_hits_2):.1f}\n"
+                      f"Max: {max(turns_btwn_hits_2)}",
+                      verticalalignment = "top",
+                      horizontalalignment = "right")
+        
+        # Lower Middle
+        pos = (2,1)
+        turns_hit_to_sink_1 = []
+        turns_hit_to_sink_2 = []
+        for result in results:
+            hits1 = np.flatnonzero(result['player1_stats']['hits'])
+            hits2 = np.flatnonzero(result['player2_stats']['hits'])
+            sinks1 = result['player1_stats']['turn_ship_sank']
+            sinks2 = result['player2_stats']['turn_ship_sank']
+            sinks1 = sorted([s for s in sinks1 if s >= 0])
+            sinks2 = sorted([s for s in sinks2 if s >= 0])
+            while sinks1:
+                sink_turn = sinks1.pop(0)
+                turns_hit_to_sink_1 += [sink_turn - hits1[0]]
+                hits1 = hits1[hits1 > sink_turn]
+            while sinks2:
+                sink_turn = sinks2.pop(0)
+                turns_hit_to_sink_2 += [sink_turn - hits2[0]]
+                hits2 = hits2[hits2 > sink_turn]
+           
+        axs[pos].hist(turns_hit_to_sink_1, 
+                      bins = np.arange(grouping[1]+1), alpha=0.7, density=True)
+        axs[pos].hist(turns_hit_to_sink_2, 
+                      bins = np.arange(grouping[1]+1), alpha=0.7, density=True)
+        axs[pos].set_title("Turns from hit to sink")
+        
+        xlim = axs[pos].get_xlim()
+        ylim = axs[pos].get_ylim()
+        axs[pos].text(max(xlim) - np.diff(xlim) * 0.02, 
+                      max(ylim) - np.diff(ylim) * 0.02,
+                      f"{results[-1]['player1'].name}\n"
+                      f"{np.mean(turns_hit_to_sink_1):.1f} +/- "
+                      f"{np.std(turns_hit_to_sink_1):.1f}\n"
+                      f"Min: {min(turns_hit_to_sink_1)}\n"
+                      f"Median: {np.median(turns_hit_to_sink_1):.1f}\n"
+                      f"Max: {max(turns_hit_to_sink_1)}\n"
+                      "\n"
+                      f"{results[-1]['player2'].name}\n"
+                      f"{np.mean(turns_hit_to_sink_2):.1f} +/- "
+                      f"{np.std(turns_hit_to_sink_2):.1f}\n"
+                      f"Min: {min(turns_hit_to_sink_2)}\n"
+                      f"Median: {np.median(turns_hit_to_sink_2):.1f}\n"
+                      f"Max: {max(turns_hit_to_sink_2)}",
+                      verticalalignment = "top",
+                      horizontalalignment = "right")
+        
+        # Lower Right
+        pos = (2,2)
+        last_winner = -1
+        streak_length = -1
+        streaks = [(last_winner, streak_length)]
+        for win in winner:
+            if win == streaks[-1][0]:
+                streak_length += 1
+            else:
+                streaks += [(last_winner, streak_length)]
+                last_winner = win
+                streak_length = 1
+                
+        streaks1 = np.array([x[1] for x in streaks if x[0] == 1])
+        streaks2 = np.array([x[1] for x in streaks if x[0] == 2])
+        axs[pos].hist(streaks1, color=p1_color, alpha=0.7)
+        axs[pos].hist(streaks2, color=p2_color, alpha=0.7)
+        
+        axs[pos].set_title("Winning Streaks")
+        
+        xlim = axs[pos].get_xlim()
+        ylim = axs[pos].get_ylim()
+        axs[pos].text(max(xlim) - np.diff(xlim) * 0.02, 
+                      max(ylim) - np.diff(ylim) * 0.02,
+                      f"{results[-1]['player1'].name}\n"
+                      f"{np.mean(streaks1):.1f} +/- "
+                      f"{np.std(streaks1):.1f}\n"
+                      f"Min: {min(streaks1)}\n"
+                      f"Median: {np.median(streaks1):.1f}\n"
+                      f"Max: {max(streaks1)}\n"
+                      "\n"
+                      f"{results[-1]['player2'].name}\n"
+                      f"{np.mean(streaks2):.1f} +/- "
+                      f"{np.std(streaks2):.1f}\n"
+                      f"Min: {min(streaks2)}\n"
+                      f"Median: {np.median(streaks2):.1f}\n"
+                      f"Max: {max(streaks2)}",
+                      verticalalignment = "top",
+                      horizontalalignment = "right")
+        
+        # Lower Left
+        pos = (3,0)
+        # correlation between first hit and winning
+        first_hit_1 = []
+        first_hit_2 = []
+        for result in results:
+            hits = result['player1_stats']['hits']
+            first_hit = np.flatnonzero(hits)[0] if any(hits) else -1
+            first_hit_1 += [first_hit]
+            hits = result['player2_stats']['hits']
+            first_hit = np.flatnonzero(hits)[0] if any(hits) else -1
+            first_hit_2 += [first_hit]
+        first_hit_1 = np.array(first_hit_1)
+        first_hit_2 = np.array(first_hit_2)
+        p1_wins = Counter(first_hit_1[winner==1])
+        p1_losses = Counter(first_hit_1[winner==2])
+        p2_wins = Counter(first_hit_2[winner==2])
+        p2_losses = Counter(first_hit_2[winner==1])
+        
+        bins = (min((min(p1_wins.keys()), min(p1_losses.keys()),
+                     min(p2_wins.keys()), min(p2_losses.keys()))),
+                max((max(p1_wins.keys()), max(p1_losses.keys()),
+                             max(p2_wins.keys()), max(p2_losses.keys()))))
+        bins = np.arange(bins[0], bins[1] + 1)
+        p1_total = p1_wins.copy()
+        p2_total = p2_wins.copy()
+        for first_hit in bins:
+            p1_total[first_hit] += p1_losses[first_hit]
+            p2_total[first_hit] += p2_losses[first_hit]
+        
+        p1_percent = [p1_wins[k]/p1_total[k] if p1_total[k] > 0 else 0
+                      for k in p1_total.keys()]
+        p2_percent = [p2_wins[k]/p2_total[k] if p2_total[k] > 0 else 0
+                      for k in p2_total.keys()]
+        axs[pos].bar(bins, p1_percent, color=p1_color, alpha=0.7)
+        axs[pos].bar(bins, p2_percent, color=p2_color, alpha=0.7)
+        
+#%%
+
+# import os
+# os.chdir('Code/Python')
+# import battleship as bs
+# game = bs.game.Game(
+#     bs.player.AIPlayer(bs.offense.HunterOffense('random', 
+#         kill_options={'method':'advanced'}), 
+#                        bs.defense.RandomDefense('random'), 
+#                        name = "Bandit"),
+#     bs.player.AIPlayer(bs.offense.HunterOffense('random', 
+#         kill_options={'method':'advanced'}), 
+#                        bs.defense.RandomDefense('random'), 
+#                        name = "Chili"),
+#     "0001")
+# game.setup()
+# game.play()
+    

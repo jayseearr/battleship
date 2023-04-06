@@ -174,6 +174,23 @@ class Ship:
 
         """
         return cls._data
+    
+    @classmethod
+    @property
+    def types(cls):
+        """
+        Returns a list of the valid ShipType values. For a typical game
+        with 5 different ship types, this list will be the equivalent of
+        [1,2,3,4,5], with each element actually set to EnumInts 
+        ShipType(1), ShipType(2), etc.
+        
+        Returns
+        -------
+        ship_types : list
+        
+
+        """
+        return list(range(1, len(cls.data) + 1))
         
     # Combat Methods
     

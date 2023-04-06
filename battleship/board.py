@@ -396,11 +396,15 @@ class Board:
             Board, and False otherwise.
 
         """
-        rows, cols = zip(*coords)
-        rows = np.array(rows)
-        cols = np.array(cols)
-        return np.array((rows >= 0) * (rows < self.size) * (cols >= 0) *
-                         (cols < self.size))
+        # rows, cols = zip(*coords)
+        # rows = np.array(rows)
+        # cols = np.array(cols)
+        # return np.array((rows >= 0) * (rows < self.size) * (cols >= 0) *
+        #                  (cols < self.size))
+        return np.array([True if (rc[0] >= 0 and rc[0] < self.size 
+                         and rc[1] >= 0 and rc[1] < self.size)
+                         else False for rc in coords])
+    
     
     # @classmethod
     # def coords_to_coords_distances(cls, coords1, coords2):
@@ -622,6 +626,7 @@ class Board:
     
     
     def all_targets_where(self, 
+                          values=None,
                           ship_type=None, 
                           hit=None, 
                           miss=None):
@@ -634,6 +639,12 @@ class Board:
         
         Parameters
         ----------
+        values : list / tuple, optional
+            A list of TargetValues that will have coordinates returned by 
+            this method. Acceptable values are any TargetValue int (-2 to 0),
+            or a ship_type in (1-5), 'hit', 'miss', 'ship'.
+            Currently the list can be omitted for a single entry, but this
+            usage is not futureproof.
         ship_type : ShipType, optional
             Type of ship (and int 1-5)
         hit : bool, optional
@@ -654,9 +665,13 @@ class Board:
 
         """
         if sum([not x for x in [ship_type==None, hit==None, miss==None]]) != 1:
-            raise ValueError("Only one of ship_type, hit, or miss can be "
-                             "passed as a parameter. The other must be None.")
+            raise ValueError("Only one of ship_type, hit, miss, or values can "
+                             "be passed as a parameter. The others must be "
+                             "None.")
             
+        if values is not None:
+            targets = list(self.target_grid_is(values = values, 
+                                               output = 'coords'))
         if ship_type is not None:
             targets = self.target_coords_with_type(ship_type)
         elif hit is not None:
@@ -692,12 +707,18 @@ class Board:
         values : list/tuple, optional
             The returned list will only contain coordinates around the input
             coord that have target grid values equal to one of the values
-            in this set. Typical usage is values = (TargetValue.HIT, ship_type)
-            where ship_type is the ShipType value of a desired target. In this
-            case, the method would return only coordinates that contain 
-            unattributed hits or hits attributable to a ship with type 
-            ship_type. If this parameter is not None, it overrides the 
+            in this set. 
+            
+            Recognized values are:
+                TargetValue.UNKNOWN (-2)
+                TargetValue.MISS    (-1)
+                TargetValue.HIT     (0)
+                ShipType value      (1-5)
+                'ship', 'hit', or 'miss'.
+                
+            If this parameter is not None, it overrides the 
             targeted and untargeted parameters. Default is None.
+            
 
         Returns
         -------
@@ -710,30 +731,66 @@ class Board:
         if untargeted and targeted:
             raise ValueError("untargeted and targeted inputs cannot "
                              "both be True.")
-        if values:
-            if isinstance(values, (int, np.integer)):
-                values = (values,)
-            rows,cols = np.where(~self.target_grid_is(values))
-            exclude = list(zip(rows,cols))
-        elif untargeted:
-            exclude = self.all_targets(targeted=True)
-        elif targeted:
-            exclude = self.all_targets(untargeted=True)
-        else:
-            exclude = []
-        
+        if values and (untargeted or targeted):
+            Warning("The 'values' parameter will override the "
+                    "targeted/untargeted parameter.")
+            
         if diagonal:
             rows = coord[0] + np.array([0, -1, -1, -1, 0, 1, 1, 1])
             cols = coord[1] + np.array([1, 1, 0, -1, -1, -1, 0, 1])
         else:
             rows = coord[0] + np.array([0, -1, 0, 1])
             cols = coord[1] + np.array([1, 0, -1, 0])
-        ivalid = ((rows >= 0) * (rows < self.size) * 
-                  (cols >= 0) * (cols < self.size))
+        ivalid = ((rows >= 0) * (rows < self.size) 
+                  * (cols >= 0) * (cols < self.size))
         rows = rows[ivalid]
         cols = cols[ivalid]
-        return [(rows[i], cols[i]) for i in range(len(rows)) if 
-                   (rows[i], cols[i]) not in exclude]
+        
+        if targeted:
+            values = (constants.TargetValue.MISS, constants.TargetValue.HIT)
+            for t in Ship.types:
+                values += (t,)
+        elif untargeted:
+            values = (constants.TargetValue.UNKNOWN, )
+            
+        if values is not None:
+            coords_with_values = self.target_grid_is(values, 
+                                                     exact_ship_type = False, 
+                                                     output = 'coords')
+            coords = [(r,c) for (r,c) in zip(rows,cols)  
+                      if (r,c) in coords_with_values]
+        else:
+            coords = list(zip(rows, cols))
+        
+        return coords
+        
+        # if untargeted and targeted:
+        #     raise ValueError("untargeted and targeted inputs cannot "
+        #                      "both be True.")
+        # if values:
+        #     if isinstance(values, (int, np.integer)):
+        #         values = (values,)
+        #     rows,cols = np.where(~self.target_grid_is(values))
+        #     exclude = list(zip(rows,cols))
+        # elif untargeted:
+        #     exclude = self.all_targets(targeted=True)
+        # elif targeted:
+        #     exclude = self.all_targets(untargeted=True)
+        # else:
+        #     exclude = []
+        
+        # if diagonal:
+        #     rows = coord[0] + np.array([0, -1, -1, -1, 0, 1, 1, 1])
+        #     cols = coord[1] + np.array([1, 1, 0, -1, -1, -1, 0, 1])
+        # else:
+        #     rows = coord[0] + np.array([0, -1, 0, 1])
+        #     cols = coord[1] + np.array([1, 0, -1, 0])
+        # ivalid = ((rows >= 0) * (rows < self.size) * 
+        #           (cols >= 0) * (cols < self.size))
+        # rows = rows[ivalid]
+        # cols = cols[ivalid]
+        # return [(rows[i], cols[i]) for i in range(len(rows)) if 
+        #            (rows[i], cols[i]) not in exclude]
     
     def is_valid_target_ship_placement(self, placement, ship=None):
         """
@@ -776,9 +833,19 @@ class Board:
         rows = np.array(rows)
         cols = np.array(cols)
         grid_vals = self.target_grid[rows, cols]
-        fits_target_grid = np.all((grid_vals == constants.TargetValue.HIT)
-                                  + (grid_vals == constants.TargetValue.UNKNOWN)
-                                  + (np.round(grid_vals) == ship_type))
+        if ship_type == 0:
+            fits_target_grid = np.all((grid_vals == constants.TargetValue.HIT)
+                                      + (grid_vals == constants.TargetValue.UNKNOWN)
+                                      + (np.round(grid_vals) >= ship_type))
+            known_ship_types = np.round(grid_vals[grid_vals > 0])
+            if len(known_ship_types) > 0:
+                fits_target_grid = (fits_target_grid and 
+                                    np.all(known_ship_types 
+                                           == known_ship_types[0]))
+        else:
+            fits_target_grid = np.all((grid_vals == constants.TargetValue.HIT)
+                                      + (grid_vals == constants.TargetValue.UNKNOWN)
+                                      + (np.round(grid_vals) == ship_type))
         if ship_type > 0:
             matches = self.all_targets_where(ship_type=ship_type)
             fits_target_grid = (fits_target_grid and
@@ -889,6 +956,7 @@ class Board:
                 TargetValue.MISS    (-1)
                 TargetValue.HIT     (0)
                 ShipType value      (1-5)
+                'ship', 'hit', or 'miss'.
                 
         exact_ship_type : Bool, optional
             If False (the default), the returned array will be True as long as
@@ -1117,13 +1185,13 @@ class Board:
 
         """
         coords = placement.coords()
-        if not np.all(self.is_valid_coord(coords)):
+        if not all(self.is_valid_coord(coords)):
             return False
         if unoccuppied:
             rows,cols = zip(*coords)
-            if np.any(self.ocean_grid[rows,cols] > 0):
+            if any(self.ocean_grid[rows,cols] > 0):
                 return False
-        return np.all(self.is_valid_coord(coords))
+        return all(self.is_valid_coord(coords))
     
     def all_valid_ship_placements(self,
                                   ship_type=None,
@@ -1269,7 +1337,7 @@ class Board:
             A 5-element boolean array.
         """
         keys = sorted(self.fleet.keys())
-        return np.array([self.fleet[k].is_afloat() for k in keys])
+        return [self.fleet[k].is_afloat() for k in keys]
             
     def coords_for_ship(self, ship):
         """
@@ -1287,12 +1355,7 @@ class Board:
             List of coordinate tuples (row,col).
 
         """
-        if isinstance(ship, Ship):
-            ship_type = int(ship.ship_id)
-        else:
-            ship_type = ship
-        if not isinstance(ship_type, int):
-            raise TypeError("ship must be an instance of Ship or an int.")
+        ship_type = ship.ship_id
         if ship_type not in self.ocean_grid:
             raise ValueError("ship type not found on ocean grid.")
         r,c = np.where(self.ocean_grid == ship_type)
@@ -1333,6 +1396,77 @@ class Board:
         else:
             raise Exception(f"Invalid coordinates for ship {ship}.")
         return Placement(coord, heading, ship.length)
+    
+    def placements_containing_coord(self, 
+                                    coord, 
+                                    ship_types=None):
+        """
+        Returns a list of all possible placmeents that include the input
+        coord for the input ship types.
+
+        Parameters
+        ----------
+        coord : tuple or Coord
+            A single coordinate tuple (or Coord object). The returned list
+            will contain all valid placements that include this coordinate.
+        ship_types : list
+            The list of ships to consider for the desired placement list.
+
+        Returns
+        -------
+        placements : list
+            A list of all valid placements that contain coord.
+
+        """
+        if not ship_types:
+            ship_types = Ship.types
+        
+        placements = []
+        for ship_type in ship_types:
+            ship_len = Ship.data[ship_type]["length"]
+            for shift in range(ship_len):
+                p1 = Placement((coord[0] - shift, coord[1]), "N", ship_len)
+                p2 = Placement((coord[0], coord[1] - shift), "W", ship_len)
+                if self.is_valid_placement(p1):
+                    placements += [p1]
+                if self.is_valid_placement(p2):
+                    placements += [p2]
+        return set(placements)
+    
+    def placements_containing_all_coords(self, 
+                                         coords,
+                                         ship_types = None):
+        """
+        Returns a list of all of the placements that span the input 
+        coordinates. Coordinates may be input as 
+
+        Parameters
+        ----------
+        coords : tuple or list
+            A tuple or list of two-element row/col tuples
+        ship_types : list, optional
+            A list of ship types to consider when determining if a placement
+            should be included in the returned list. 
+            The default is None, which implies that all ship types should be
+            considered.
+
+        
+        Returns
+        -------
+        valid_placements : list
+            A list of all of the valid placements that include all of the
+            input coordinates.
+
+        """
+
+        placements = {}
+        for coord in coords:
+            placements[coord] = self.placements_containing_coord(coord, 
+                                                                 ship_types)
+        valid_placements = placements[coords[0]]
+        for coord in coords[1:]:
+            valid_placements = valid_placements.intersection(placements[coord])
+        return valid_placements 
     
     # Fleet Placement Methods
     
@@ -1409,8 +1543,6 @@ class Board:
         """
         if isinstance(ship_type, str):
             ship_type = Ship.type_for_name(ship_type)
-        elif isinstance(ship_type, Ship):
-            ship_type = ship_type.ship_id            
         ship = Ship(ship_type)
         if coord or heading:
             if placement:
@@ -1587,18 +1719,22 @@ class Board:
         
         # Update target_grid if any ship placements can now be unambiguously
         # determined:
-        for tp in range(1, len(Ship.data)+1):
-            placements = self.all_valid_target_placements(tp)
-            if len(placements) == 1:
-                # update a shadow target_grid that contains targets to shoot
-                # next, rather than where we've already shot.
-                
-                #coords = self.coords_for_placement(placements[0])
-                coords = placements[0].coords()
-                for coord in coords:
-                    if (self.target_grid[coord[0],coord[1]] 
-                            == constants.TargetValue.HIT):
-                        self.target_grid[coord[0],coord[1]] = tp
+        out_of_sync = True
+        while out_of_sync:
+            out_of_sync = False
+            for tp in Ship.types:
+                placements = self.all_valid_target_placements(tp)
+                if len(placements) == 1:
+                    coords = placements[0].coords()
+                    for coord in coords:
+                        if (self.target_grid[coord[0], coord[1]] 
+                                == constants.TargetValue.HIT):
+                            # if any updates are made, repeat the search
+                            # process to see if any other ships can be 
+                            # identified.
+                            out_of_sync = True
+                            self.target_grid[coord[0], coord[1]] = tp
+                            
     
     
     # Visualization functions

@@ -19,6 +19,7 @@ from battleship import utils
 from battleship.ship import Ship
 from battleship.board import Board
 from battleship.coord import Coord
+from battleship.placement import Placement
 
 
 # %% Player Class
@@ -110,7 +111,7 @@ class Player(abc.ABC):
         self._opponent = None
         self._verbose = False
         
-        self._game_history = None    # for future use
+        self._game_history = []      # a list of game result dictionaries
         self._notes = None           # for future use
         
     def __str__(self):
@@ -193,6 +194,9 @@ class Player(abc.ABC):
         from user input then pass the placements to player.board.add_fleet.
         """
         pass
+    
+    # Consider an abstractmethod for update_state. For HumanPlayer,
+    # this wouldn't do anything.
     
     ### Properties ###
     
@@ -312,7 +316,19 @@ class Player(abc.ABC):
     def verbose(self, value):
         self._verbose = value
             
+    @property
+    def game_history(self):
+        return self._game_history
     
+    def add_result_to_history(self, value):
+        """Adds the input result dictionary to the outcome history list.
+        See the Game class definition for contents of a result dictionary.
+        """
+        if self.game_history is None:
+            self._game_history = [value]
+        else:
+            self._game_history += [value]
+        
     # Computed Properties
     
     @property
@@ -359,6 +375,35 @@ class Player(abc.ABC):
         if self.offense:
             self.offense.reset()
         
+    def dumb_copy(self):
+        """
+        Returns a dumb copy of the player instance. The copy is an instance
+        of DummyPlayer, and has no offense, defense, or board properties.
+
+        Returns
+        -------
+        new_player : DummyPlayer
+            An instance of the DummyPlayer class that has the same attributes
+            as the copied Player instance (except offense, defense, and board)
+
+        """
+        new_player = DummyPlayer(name = self.name, 
+                                 board_size = self.board.size)
+        
+        new_player._shot_history = self.shot_history
+        new_player._outcome_history = self.outcome_history
+        new_player._remaining_targets = self.remaining_targets
+        new_player._possible_targets = self._possible_targets
+        new_player._board = self.board
+        new_player._opponent = self.opponent
+        new_player._verbose = self.verbose
+        
+        new_player._game_history = self.game_history      # a list of game result dictionaries
+        new_player._notes = self._notes
+        
+        return new_player
+    
+        
     def copy_history_from(self, other):
         """Copies shot and outcome histories from the input Player instance
         into this Player's histories (overwriting any existing histories).
@@ -367,8 +412,12 @@ class Player(abc.ABC):
         """
         self._outcome_history = other.outcome_history
         self._remaining_targets = other.remaining_targets
-        self._game_history = other.game_history
-        self._notes += other.notes
+        self._game_history = other._game_history
+        if other._notes:
+            if self._notes:
+                self._notes += other._notes
+            else:
+                self._notes = other._notes
         
     def is_alive(self): 
         """Returns true if any of this players ships are still afloat."""
@@ -386,6 +435,8 @@ class Player(abc.ABC):
             - sunk_ship_id
             - message
         """
+        if not self.opponent:
+            raise ValueError("Opponent has not been set; no board to fire at.")
         target_coord = (target_coord[0], target_coord[1]) # enforce tuple
         outcome = self.opponent.board.incoming_at_coord(target_coord)
         self.board.update_target_grid(outcome)
@@ -431,10 +482,20 @@ class Player(abc.ABC):
         nshots = len(history)
         shots_rc = np.array([h['coord'] for h in history])
         hits = np.array([h['hit'] for h in history])
-        ships_sank = np.array([h['sunk_ship_id'] for h in history if 
-                               h['sunk_ship_id'] != None])
-        shots_mean = np.mean(shots_rc,axis=0)
-        shots_var = np.var(shots_rc - np.tile(shots_mean, (nshots,1)), axis=0)
+        ships_sank = np.array([h['sunk_ship_type'] for h in history if 
+                               h['sunk_ship_type'] != None])
+        turn_ship_sank = [-1, -1, -1, -1, -1]
+        for (turn, h) in enumerate(history):
+            if h['sunk_ship_type'] != None:
+                turn_ship_sank[h['sunk_ship_type'] - 1] = turn
+        if len(shots_rc):
+            shots_mean = np.mean(shots_rc,axis=0)
+            shots_var = np.var(shots_rc - np.tile(shots_mean, (nshots,1)),
+                               axis=0)
+        else:
+            shots_mean = None
+            shots_var = None
+            
         # ships
         ships_rc = np.empty((0,2), int)
         for ship in self.board.fleet.values():
@@ -446,6 +507,7 @@ class Player(abc.ABC):
         return dict(nshots = nshots,
                     hits = hits, 
                     ships_sank = ships_sank,
+                    turn_ship_sank = turn_ship_sank, 
                     shots_mean = shots_mean,
                     shots_var = shots_var,
                     ships_mean = ships_mean,
@@ -455,6 +517,122 @@ class Player(abc.ABC):
         
         
 #%% Concrete Player Subclasses
+
+#%% DummyPlayer
+
+class DummyPlayer(Player):
+    
+    def __init__(self, name="", board_size=10):
+        """
+        A basic concrete instance of the Player abstract class.
+        Not useful for playing a real game, but easy to instantiate by simply
+        calling DummyPlayer(). This returns a fully prepared player, with fleet
+        already placed.
+        
+        A DummyPlayer cannot use an Offense or Defense objects.
+        
+        When taking a turn (i.e., firing a shot), the dummy player always
+        shoots at coordinate (0,0).
+        
+        The dummy player's fleet will always be placed in the top left corner
+        of the board, with ships oriented vertically. The front of each ship
+        will be in the top row, and ships will be placed left to right in
+        order of increasing length. See diagram below for layout
+        
+          1 2 3 4 5 6 7 ...
+        A p d s b c - -
+        B p d s b c - -
+        C - d s b c - -
+        D - - - b c - - 
+        E - - - - c - -
+        F - - - - - - -
+        :
+            
+        p = Patrol, d = Destroyer, s = Sub, B = battleship, C = carrier.
+
+        Parameters
+        ----------
+        name : str, optional
+            A string used to identify the player instance. The default is "".
+        board_size : int, optional
+            The size of the board that the dummy player uses. The default
+            is 10.
+            
+        Returns
+        -------
+        None.
+
+        """
+        super().__init__(name)
+        self._offense = None
+        self._defense = None
+        
+        self.board = Board(board_size)
+        self.prepare_fleet()
+        
+    @property
+    def offense(self):
+        return self._offense
+    
+    @offense.setter
+    def offense(self,value):
+        raise AttributeError("offense is always None for DummyPlayer.")
+        
+    @property
+    def defense(self):
+        return self._defense
+    
+    @defense.setter
+    def defense(self,value):
+        raise AttributeError("defense is always None for DummyPlayer.")
+        
+    @property
+    def player_type(self):
+        return "Dummy"
+    
+    def take_turn(self):
+        """
+        Fires a shot at the opponent's board, always at coordinate (0,0).
+
+        Returns
+        -------
+        tuple
+            The coordinate (0,0).
+
+        """
+        self.fire_at_target((0,0))
+    
+    def prepare_fleet(self):
+        """
+        Creates a board property and places the fleet on the board in the 
+        following configuration:
+          
+          1 2 3 4 5 6 7 ...
+        A p d s b c - -
+        B p d s b c - -
+        C - d s b c - -
+        D - - - b c - - 
+        E - - - - c - -
+        F - - - - - - -
+        :
+            
+        p = Patrol, d = Destroyer, s = Sub, B = battleship, C = carrier.
+
+        Returns
+        -------
+        None.
+
+        """
+        if not self.board:
+            self.board = Board()
+        placements = {}
+        for k in Ship.types:
+            placements[constants.ShipType(k)] = Placement((0,k-1), "N", 
+                                                          Ship.data[k]["length"])
+        self.board.add_fleet(placements)
+        
+        
+#%% HumanPlayer
 
 class HumanPlayer(Player):
     """An concrete subclass of Player provides an interface so a Human user
@@ -475,6 +653,8 @@ class HumanPlayer(Player):
     
     Other methods
     - __init__
+    - input_placements
+    
     """
     
     ### Initializers and Such ###
@@ -525,10 +705,14 @@ class HumanPlayer(Player):
     def player_type(self):
         return "Human"
     
-    def take_turn(self):
+    def take_turn(self, target=None):
         """Get a target from the human, and fire at that target on the opponent's
         board.
         """
+        if target != None:
+            self.fire_at_target(target)
+            return
+        
         if self.target_select_mode == "text":
             print(self.board.color_str())
             if self.outcome_history:
@@ -572,7 +756,7 @@ class HumanPlayer(Player):
                              "Defense, a dictionary, or None (for "
                              "interactive input).")
             
-        self.board.place_fleet(placements)
+        self.board.add_fleet(placements)
         if self.verbose:
             print("Fleet placed successfully.")  
     
@@ -624,6 +808,7 @@ class HumanPlayer(Player):
     
     
 #%% AIPlayer
+
 class AIPlayer(Player):
     
     ### Initializers and Such ###
@@ -689,12 +874,16 @@ class AIPlayer(Player):
     def player_type(self):
         return "AI"
     
-    def take_turn(self):
+    def take_turn(self, target=None):
         """Get a target from the AI Player's strategy and fire at that 
         coordinate.
+        
+        Optionally use the provided target parameter as the target coordinate.
         """
-        self.fire_at_target(self.offense.target(self.board, 
-                                                self.outcome_history))
+        if target == None:
+            target = self.offense.target(self.board, self.outcome_history)
+            #print(f"Target: {target}")
+        self.fire_at_target(target)
         self.offense.update_state(self.last_outcome)
         
         # self.offense.possible_targets contains the list of all potential

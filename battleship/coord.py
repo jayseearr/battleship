@@ -134,6 +134,9 @@ class Coord:
         """Returns the label strings for the Coord's location."""
         return self.lbl
     
+    def __len__(self):
+        return len(self.rowcol)
+    
     def __eq__(self, other):
         """Compares the Coord's row/column and value (if any) variables. 
         If they are the same as the second item in the comparison, the two 
@@ -219,7 +222,7 @@ class Coord:
             True if the input touches this Coord, False otherwise.
 
         """
-        return (self[0] - other[0])**2 + (self[1] - other[1])**2 <= 1
+        return (self[0] - other[0])**2 + (self[1] - other[1])**2 == 1
     
     def diagonal_to(self, other):
         """

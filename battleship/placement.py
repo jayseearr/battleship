@@ -53,10 +53,43 @@ class Placement:
         self._coord = None
         self._heading = None
         self._length = None
+        
+        # Set properties:
+        # coord
+        if isinstance(coord, tuple):
+            if len(coord) != 2:
+                raise ValueError("coord must be a two-element tuple.")
+        elif isinstance(coord, Coord):
+            coord = (coord[0], coord[1])
+        else:
+            raise TypeError("coord must be a two-element tuple "
+                            "or an instance of Coord.")
+        self._coord = coord
+        
+        # heading
+        if isinstance(heading, str):
+            heading = heading.upper()
+            
+            if heading in ["N", "S", "E", "W"]:
+                self._heading = heading
+            elif heading in ["NORTH", "SOUTH", "EAST", "WEST"]:
+                self._heading = heading[0]
+            else:
+                raise ValueError("Heading must be 'North', 'South', "
+                                 "'East', 'West' (or abbreviation).")
+        else:
+            raise TypeError("heading must be a string.")
+            
+        # length
+        if isinstance(length, int):
+            self._length = length
+        else:
+            raise TypeError("length must be an integer.")
+            
         # set properties using setters
-        self.coord = coord
-        self.heading = heading
-        self.length = length
+        # self.coord = coord
+        # self.heading = heading
+        # self.length = length
       
     def __repr__(self):
         return (f"Placement({self._coord!r}, {self._heading!r}, "
@@ -69,12 +102,7 @@ class Placement:
     
     @coord.setter
     def coord(self, value):
-        if isinstance(value, tuple):
-            if len(value) != 2:
-                raise ValueError("coord must be a two-element tuple.")
-        elif isinstance(value, Coord):
-            value = (value[0], value[1])
-        self._coord = value
+        raise AttributeError("Placement's coord is immuatable.")
         
     @property
     def heading(self):
@@ -82,17 +110,7 @@ class Placement:
     
     @heading.setter
     def heading(self, value):
-        if value is None:
-            self._heading = None
-            return
-        value = value.upper()
-        if value in ["N", "S", "E", "W"]:
-            self._heading = value
-        elif value in ["NORTH", "SOUTH", "EAST", "WEST"]:
-            self._heading = value[0]
-        else:
-            raise ValueError("Heading must be 'North', 'South', "
-                             "'East', 'West' (or abbreviation).")
+        raise AttributeError("Placement's heading is immuatable.")
         
     @property
     def length(self):
@@ -100,10 +118,8 @@ class Placement:
     
     @length.setter
     def length(self, value):
-        if isinstance(value, int):
-            self._length = value
-        else:
-            raise ValueError("length must be an integer.")
+        raise AttributeError("Placement's length is immuatable.")
+        
         
     ### Computed Properties ###
     
@@ -119,18 +135,27 @@ class Placement:
 
         """
         if self.heading == "N":
-            ds = (1,0)
+            # ds = (1,0)
+            coords = [(self.coord[0] + dr, self.coord[1]) 
+                      for dr in range(self.length)]
         elif self.heading == "S":
-            ds = (-1,0)
+            #ds = (-1,0)
+            coords = [(self.coord[0] + dr, self.coord[1]) 
+                      for dr in range(0, -self.length, -1)]
         elif self.heading == "E":
-            ds = (0,-1)
+            #ds = (0,-1)
+            coords = [(self.coord[0], self.coord[1] + dc) 
+                      for dc in range(0, -self.length, -1)]
         elif self.heading == "W":
-            ds = (0,1)
+            #ds = (0,1)
+            coords = [(self.coord[0], self.coord[1] + dc) 
+                      for dc in range(self.length)]
             
-        ds = np.vstack(([0,0], 
-                        np.cumsum(np.tile(ds, (self.length-1,1)), axis=0)))
-        return [(delta[0] + self.coord[0], delta[1] + self.coord[1])
-                for delta in ds]
+        return coords
+        # ds = np.vstack(([0,0], 
+        #                 np.cumsum(np.tile(ds, (self.length-1,1)), axis=0)))
+        # return [(delta[0] + self.coord[0], delta[1] + self.coord[1])
+        #         for delta in ds]
         
     def rows(self):
         """
@@ -212,6 +237,12 @@ class Placement:
 
         """
         return set(self.coords()) == set(other.coords())
+    
+    def __ne__(self, other):
+        return not self.__eq__(other)
+    
+    def __hash__(self):
+        return hash(tuple(self.coords()))
     
     ### Other methods ###
     

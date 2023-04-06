@@ -19,7 +19,8 @@ import numpy as np
 
 # Imports from this package
 from battleship.constants import Align
-
+from battleship.coord import Coord
+from battleship.ship import Ship
 
 
 #%% 
@@ -185,3 +186,65 @@ def parse_alignment(alignment):
         raise ValueError("String input must indicate a direction "
                          "('north', 'east', 'horizontal', 'any', etc.)")
     return alignment
+
+
+#%% 
+
+### Miscellaneous Functions ###
+
+def pretty_outcomes(history, reverse=False):
+    """
+    Returns a string with easily readable results for each outcome in history.
+
+    Parameters
+    ----------
+    history : list
+        List of outcome dictionaries.
+    reverse : bool
+        If False, results are listed in order, with the first turn at the top
+        of the output string and last turn at the bottom. 
+        If True, the results are flipped so that most recent turn is displayed
+        at the top of the string.
+
+    Returns
+    -------
+    outcome_str : String.
+        A string with one line per outcome in history describing the result
+        of each of the player's turns.
+
+    """
+    
+    hit_clr = "\x1b[1;31m"
+    miss_clr = "\x1b[1;36m"
+    sink_clr = "\x1b[1;37;41m"
+    reset_clr = "\x1b[0;0m"
+    target_clr = "\x1b[1;33m"
+    
+    lines = []
+    for (turn, outcome) in enumerate(history):
+        
+        if outcome["hit"]:
+            hit_or_miss = f"{hit_clr}Hit!"
+        else:
+            hit_or_miss = f"{miss_clr}Miss"
+        
+        if outcome["sunk"]:
+            sink = f"{Ship.data[outcome['sunk_ship_type']]['name']} sunk"
+        else:
+            sink = ""
+            
+        target = Coord(outcome['coord'])
+        outcome_str = f" {turn+1}\t\t"
+        nspaces = 3 - len(str(target))
+        outcome_str += f"{target_clr}{target}{reset_clr}{' ' * nspaces} .... "
+        outcome_str += f"{hit_or_miss}{reset_clr}"
+        if sink:
+            outcome_str += f" \t  {sink_clr}{sink}{reset_clr}"
+        
+        lines += [outcome_str]
+        turn += 1
+        
+    if reverse:
+        lines = reversed(lines)
+    
+    return ("Turn \tTarget | Result | Sink?\n" + "\n".join(lines))

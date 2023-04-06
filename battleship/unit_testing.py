@@ -92,7 +92,6 @@ class TestUtilsFunctions(unittest.TestCase):
         
         
     def test_mirror_coords(self):
-        from battleship import constants
         
         self.assertRaises(TypeError, utils.mirror_coords, (0,0), 0, 10)
         # corners
@@ -1070,16 +1069,16 @@ class TestBoardMethods(unittest.TestCase):
         b = Board(3)
         b.add_ship(3,(0,2),"N")
         b.add_ship(1,(1,1),"N")
-        self.assertTrue(np.all(b.is_fleet_afloat() 
-                               == np.array([True, True])))
+        self.assertTrue(all(b.is_fleet_afloat() 
+                            == np.array([True, True])))
         for i in range(len(b.fleet[3].damage)):
             b.fleet[3].damage[i] = 1.
-        self.assertTrue(np.all(b.is_fleet_afloat() 
-                               == np.array([True, False])))
+        self.assertTrue(all(b.is_fleet_afloat() 
+                            == np.array([True, False])))
         for i in range(len(b.fleet[1].damage)):
             b.fleet[1].damage[i] = 1.
-        self.assertTrue(np.all(b.is_fleet_afloat() 
-                               == np.array([False, False])))
+        self.assertTrue(all(b.is_fleet_afloat() 
+                            == np.array([False, False])))
         
     def test_coords_for_ship(self):
         b = Board(10)
@@ -1125,6 +1124,59 @@ class TestBoardMethods(unittest.TestCase):
         self.assertEqual(b.placement_for_ship(Ship(1)), Placement((0,0),"N",2))
         self.assertRaises(ValueError, b.placement_for_ship, Ship(5))
         
+    def test_placements_containing_coord(self):
+        b = Board(4)
+        self.assertRaises(TypeError, b.placements_containing_coord, 
+                          (1,2), ship_types=1)
+        
+        self.assertSetEqual(b.placements_containing_coord((1,2), 
+                                                          ship_types=[1]), 
+                            set([Placement((0,2),"N",2), 
+                                 Placement((1,2),"N",2),
+                                 Placement((1,1),"W",2),
+                                 Placement((1,2),"W",2)]))
+        self.assertSetEqual(b.placements_containing_coord((1,2), 
+                                                          ship_types=[1,2,3]), 
+                            set([Placement((0,2),"N",2), 
+                                 Placement((1,2),"N",2),
+                                 Placement((1,1),"W",2),
+                                 Placement((1,2),"W",2),
+                                 Placement((0,2),"N",3),
+                                 Placement((1,2),"N",3),
+                                 Placement((1,0),"W",3),
+                                 Placement((1,1),"W",3)]))
+        
+        self.assertEqual(len(b.placements_containing_coord((0,0))), 6)
+        self.assertEqual(len(Board(10).placements_containing_coord((4,4))), 
+                         2*2 + 2*3 + 2*4 + 2*5)
+        
+    def test_placements_containing_all_coords(self):
+        self.assertRaises(TypeError, Board(10).placements_containing_all_coords, 
+                          [(1,2),(3,4)], ship_types=1)
+        self.assertRaises(TypeError, Board(10).placements_containing_all_coords, 
+                          (1,2), ship_types=[1])
+        b = Board(10)
+        self.assertSetEqual(b.placements_containing_all_coords([(0,1),(0,3)]), 
+                            set([Placement((0, 0), 'W', 4),
+                                 Placement((0, 0), 'W', 5),
+                                 Placement((0, 1), 'W', 3),
+                                 Placement((0, 1), 'W', 4),
+                                 Placement((0, 1), 'W', 5)]))
+        self.assertSetEqual(b.placements_containing_all_coords([(0,1),(0,3)],
+                                                               ship_types=[4]), 
+                            set([Placement((0, 0), 'W', 4),
+                                 Placement((0, 1), 'W', 4)]))
+        self.assertSetEqual(b.placements_containing_all_coords([(0,0),(0,3)]), 
+                            set([Placement((0, 0), 'W', 4), 
+                                 Placement((0, 0), 'W', 5)]))
+        b = Board(3)
+        self.assertSetEqual(b.placements_containing_all_coords([(1,1),(2,1)]), 
+                            set([Placement((1, 1), 'N', 2), 
+                                 Placement((0, 1), 'N', 3)]))
+        self.assertEqual(len(b.placements_containing_all_coords([(0,0),(1,1)])), 0)
+        self.assertSetEqual(b.placements_containing_all_coords([(0,0),(1,1)]),
+                            set())
+                
     def test_add_fleet(self):
         b = Board(10)
         placements = {}
@@ -1564,14 +1616,1441 @@ class TestBoardMethods(unittest.TestCase):
         
         self.assertSetEqual(Board(10).find_hits(), set())
     
+#%% Defense
+from battleship.defense import Defense, RandomDefense
+
+class TestDefenseFunctions(unittest.TestCase):
+    
+    def test_init(self):
+        # should not be able to instantiate abstract class Defense
+        self.assertRaises(TypeError, Defense)
+
+        
+class TestRandomDefenseFunctions(unittest.TestCase):
+    
+    def test_init(self):
+        
+        defense = RandomDefense()
+        # default parameters
+        self.assertEqual(defense.formation, "random")
+        self.assertEqual(defense.method, "weighted")
+        self.assertEqual(defense.edge_buffer, 0)
+        self.assertEqual(defense.ship_buffer, 0)
+        self.assertEqual(defense.alignment, constants.Align.ANY)
+        
+        # check formation parameters
+        self.assertEqual(RandomDefense("RANDOM").formation, "random")
+        self.assertEqual(RandomDefense(formation="RANDOM").formation, "random")
+        self.assertEqual(RandomDefense("cluster").formation, "clustered")
+        self.assertEqual(RandomDefense("clustered").formation, "clustered")
+        self.assertEqual(RandomDefense("isolate").formation, "isolated")
+        self.assertEqual(RandomDefense("isolated").formation, "isolated")
+        self.assertRaises(ValueError, RandomDefense, formation="not allowed")
+        
+        # check method parameters (depend on formation params)
+        self.assertEqual(RandomDefense("RANDOM").method, "weighted") #default
+        self.assertEqual(RandomDefense("cluster").method, "weighted")
+        self.assertEqual(RandomDefense("isolate").method, "weighted")
+        
+        self.assertEqual(RandomDefense("random", "any").method, "any")
+        self.assertEqual(RandomDefense("random", "weighted").method, 
+                         "weighted")
+        self.assertEqual(RandomDefense("random", "optimize").method, 
+                         "optimize")
+        self.assertRaises(ValueError, RandomDefense, "random", "not allowed")
+        
+        self.assertEqual(RandomDefense("cluster", "any").method, "any")
+        self.assertEqual(RandomDefense("cluster", "weighted").method, 
+                         "weighted")
+        self.assertEqual(RandomDefense("cluster", "optimize").method, 
+                         "optimize")
+        self.assertRaises(ValueError, RandomDefense, "cluster", "not allowed")
+        
+        self.assertEqual(RandomDefense("isolate", "any").method, "any")
+        self.assertEqual(RandomDefense("isolate", "weighted").method, 
+                         "weighted")
+        self.assertEqual(RandomDefense("isolate", "optimize").method, 
+                         "optimize")
+        self.assertRaises(ValueError, RandomDefense, "isolate", "not allowed")
+        
+        
+        # test edge_buffer
+        self.assertRaises(TypeError, RandomDefense, 
+                          edge_buffer = "NOT AN INT")
+        self.assertEqual(RandomDefense(edge_buffer=2).edge_buffer, 2)
+        
+        # test ship_buffer
+        self.assertRaises(TypeError, RandomDefense, 
+                          ship_buffer = "NOT AN INT")
+        self.assertRaises(TypeError, RandomDefense, 
+                          ship_buffer = [1])
+        self.assertEqual(RandomDefense(ship_buffer=2).ship_buffer, 2)
+        
+        # test alignment
+        self.assertRaises(ValueError, RandomDefense, 
+                          alignment = "NOT VALID")
+        self.assertEqual(RandomDefense(alignment="N/S").alignment, 
+                         constants.Align.VERTICAL)
+        
+    def test_formation(self):
+        d = RandomDefense("isolate")
+        self.assertEqual(d._formation, d.formation)
+        d.formation = "cluster"
+        self.assertEqual(d.formation, "clustered")
+        # test the formation setter using __setattr__
+        self.assertRaises(ValueError, d.__setattr__, "formation", "foo")
+        
+    def test_method(self):
+        d = RandomDefense("isolate", method="weighted")
+        self.assertEqual(d._formation, d.formation)
+        d.method = "any"
+        self.assertEqual(d.method, "any")
+        # test the method setter using __setattr__
+        self.assertRaises(ValueError, d.__setattr__, "method", "foo")
+        
+    def test_edge_buffer(self):
+        d = RandomDefense("isolate", method="weighted", edge_buffer=1)
+        self.assertEqual(d._edge_buffer, d.edge_buffer)
+        d.edge_buffer = 2
+        self.assertEqual(d.edge_buffer, 2)
+        # test the edge_buffer setter using __setattr__
+        self.assertRaises(TypeError, d.__setattr__, "edge_buffer", "foo")
+        self.assertRaises(ValueError, d.__setattr__, "edge_buffer", -10)
+        
+    def test_ship_buffer(self):
+        d = RandomDefense("isolate", method="weighted", ship_buffer=1)
+        self.assertEqual(d._ship_buffer, d.ship_buffer)
+        d.ship_buffer = 2
+        self.assertEqual(d.ship_buffer, 2)
+        # test the ship_buffer setter using __setattr__
+        self.assertRaises(TypeError, d.__setattr__, "ship_buffer", "foo")
+        self.assertRaises(ValueError, d.__setattr__, "ship_buffer", -10)
+        
+    def test_alignment(self):
+        d = RandomDefense("isolate", method="weighted", alignment="NS")
+        self.assertEqual(d._alignment, d.alignment)
+        d.alignment = "EW"
+        self.assertEqual(d.alignment, constants.Align.HORIZONTAL)
+        # test the alignment setter using __setattr__
+        self.assertRaises(ValueError, d.__setattr__, "alignment", "foo")
+        
+    def test_placement_for_ship(self):
+        b = Board(10)
+        ship_type = 5
+        p = RandomDefense("Random", "any").placement_for_ship(b, ship_type)
+        self.assertEqual(p.length, Ship.data[ship_type]["length"])
+        self.assertIn(p.heading, set(["N","S","E","W"]))
+        self.assertTrue(b.is_valid_placement(p))
+        
+        ntests = 50
+        
+        # test edge buffer
+        d = RandomDefense("random", "any", edge_buffer=1)
+        for _ in range(ntests):
+            p = d.placement_for_ship(b, ship_type)
+            coords = np.array(p.coords())
+            self.assertTrue(np.all((coords > 0) *
+                                   (coords < b.size-1)))
+            
+        # test ship buffer
+        p2 = Placement((0,0), "N", 4)
+        forbidden_coords = set([(0,0), (1,0), (2,0), (3,0), (4,0),
+                                (0,1), (1,1), (2,1), (3,1)])
+        b = Board(10)
+        b.add_ship(4, placement = p2)
+        d = RandomDefense("random", "any", ship_buffer=1)
+        for _ in range(ntests):
+            p = d.placement_for_ship(b, ship_type)
+            for coord in p.coords():
+                self.assertNotIn(coord, forbidden_coords)
+                          
+        # test alignments
+        b = Board(10)
+        dv = RandomDefense("random", "any", alignment=constants.Align.VERTICAL)
+        dh = RandomDefense("random", "any", alignment=constants.Align.HORIZONTAL)
+        for _ in range(ntests):
+            pv = dv.placement_for_ship(b, ship_type)
+            delta = np.diff(np.array(pv.coords()),axis=0)
+            self.assertTrue(np.all(delta[:,1] == 0))
+            ph = dh.placement_for_ship(b, ship_type)
+            delta = np.diff(np.array(ph.coords()),axis=0)
+            self.assertTrue(np.all(delta[:,0] == 0))
+            
+        
+        # statistically test placements
+        # average distance between ship placements should be closer than
+        # random for clustered, and farther than random for isolated.
+        # The distance should increase (decrease) when going from 
+        # any --> weighted --> optimize methods for isolated (clustered)
+        # formations. This may not be true for clustered, where any means
+        # that
+        ship_type = 2
+        dcluster = RandomDefense(formation="cluster", method="weighted")
+        drandom = RandomDefense(formation="random", method="weighted")
+        disolate = RandomDefense(formation="isolate", method="weighted")
+        
+        b = Board(10)
+        p0 = Placement((6,8), "N", Ship.data[3]["length"])
+        p1 = Placement((5,7), "N", Ship.data[4]["length"])
+        b.add_ship(3, placement=p0)
+        b.add_ship(4, placement=p1)
+        ave_dists = np.zeros((ntests, 3))
+        for n in range(ntests):
+            pr = drandom.placement_for_ship(b, ship_type)
+            pc = dcluster.placement_for_ship(b, ship_type)
+            pi = disolate.placement_for_ship(b, ship_type)
+            dr = (np.mean(pr.placement_dist_matrix(p0))
+                  + np.mean(pr.placement_dist_matrix(p1)))
+            dc = (np.mean(pc.placement_dist_matrix(p0))
+                  + np.mean(pc.placement_dist_matrix(p1)))
+            di = (np.mean(pi.placement_dist_matrix(p0))
+                  + np.mean(pi.placement_dist_matrix(p1)))
+            ave_dists[n,:] = np.array((dc, dr, di))
+            
+        self.assertTrue(np.all(np.diff(np.mean(ave_dists, axis=0)) > 0))
+            
+    
 #%% Offense
 
-#%% Defense
+from collections import Counter
+from battleship.offense import Offense, HunterOffense, Mode
+
+class TestOffenseFunctions(unittest.TestCase):
+    
+    def test_init(self):
+        # should not be able to instantiate abstract class Offense
+        self.assertRaises(TypeError, Offense)
+
+        
+class TestHunterOffenseFunctions(unittest.TestCase):
+    
+    def test_init(self):
+        
+        hunter = HunterOffense("random")
+        
+                                
+        # default parameters
+        self.assertEqual(hunter._hunt_style, "random")
+        self.assertEqual(hunter._hunt_pattern, "random")
+        self.assertDictEqual(hunter.hunt_options, {'edge_buffer': 0,
+                                                    'ship_buffer': 0,
+                                                    'weight': 'any',
+                                                    'rotate': 0,
+                                                    'mirror': False,
+                                                    'spacing': 0,
+                                                    'secondary_spacing': 0,
+                                                    'no_valid_targets': 'random',
+                                                    'dist_method': 'dist2',
+                                                    'user_data': None,
+                                                    'note': None}
+                             )
+        self.assertDictEqual(hunter.kill_options, {'method': 'advanced', 
+                                                    'user_data': None, 
+                                                    'note': None}
+                             )
+        
+        # check hunt_style parameters
+        self.assertEqual(HunterOffense("RANDOM")._hunt_style, "random")
+        self.assertEqual(HunterOffense(hunt_style="RANDOM")._hunt_style, "random")
+        self.assertEqual(HunterOffense("pattern")._hunt_style, "pattern")
+        # self.assertRaises(ValueError, HunterOffense, hunt_style="not allowed")
+        
+        # check hunt_pattern parameters (depend on hunt_style params)
+        # hunt_stype = "random"
+        self.assertEqual(HunterOffense("RANDOM")._hunt_pattern, "random") #default
+        self.assertEqual(HunterOffense("random", "MAXPROB")._hunt_pattern, 
+                         "maxprob")
+        self.assertEqual(HunterOffense("random", "isolate")._hunt_pattern, 
+                         "isolated")
+        self.assertEqual(HunterOffense("random", "isolated")._hunt_pattern, 
+                         "isolated")
+        self.assertEqual(HunterOffense("random", "cluster")._hunt_pattern, 
+                         "clustered")
+        self.assertEqual(HunterOffense("random", "clustered")._hunt_pattern, 
+                         "clustered")
+        # self.assertRaises(ValueError, HunterOffense, hunt_style="pattern", 
+        #                   hunt_pattern="maxprob")
+        # self.assertRaises(ValueError, HunterOffense, hunt_pattern="foo")
+        
+        # hunt_style = "pattern"
+        self.assertEqual(HunterOffense("pattern")._hunt_pattern, "grid")
+        self.assertEqual(HunterOffense("pattern", "GRID")._hunt_pattern, "grid")
+        self.assertEqual(HunterOffense("pattern", "diagonals")._hunt_pattern, 
+                         "diagonals")
+        self.assertEqual(HunterOffense("pattern", "spiral")._hunt_pattern, 
+                         "spiral")
+        # self.assertRaises(ValueError, HunterOffense, "pattern", 
+        #                   hunt_pattern="random")
+        # self.assertRaises(ValueError, HunterOffense, "pattern", 
+        #                   hunt_pattern="foo")
+        
+        # test hunt_options
+        default_options = {'edge_buffer': 0,
+                           'ship_buffer': 0,
+                           'weight': 'any',
+                           'rotate': 0,
+                           'mirror': False,
+                           'spacing': 0,
+                           'secondary_spacing': 0,
+                           'no_valid_targets': 'random',
+                           'dist_method': 'dist2',
+                           'user_data': None,
+                           'note': None
+                           }
+        self.assertDictEqual(HunterOffense(hunt_style="random").hunt_options,
+                             default_options)
+        self.assertDictEqual(HunterOffense(hunt_style="pattern").hunt_options,
+                             default_options)
+        self.assertEqual(HunterOffense(hunt_style="random", 
+                                           hunt_options={"edge_buffer": 3}
+                                           ).hunt_options["edge_buffer"],
+                             3)
+        self.assertEqual(HunterOffense(hunt_style="random", 
+                                           hunt_options={"ship_buffer": 4}
+                                           ).hunt_options["ship_buffer"],
+                             4)
+        self.assertEqual(HunterOffense(hunt_style="random", 
+                                           hunt_options={"weight": 1.1}
+                                           ).hunt_options["weight"],
+                             1.1)
+        self.assertEqual(HunterOffense(hunt_style="random", 
+                                           hunt_options={"weight": "hits"}
+                                           ).hunt_options["weight"],
+                             "hits")
+        # can technically add any key/value to hunt_options:
+        self.assertEqual(HunterOffense(hunt_style="random", 
+                                           hunt_options={"foo": "bar"}
+                                           ).hunt_options["foo"],
+                             "bar")
+        
+        # test kill_options
+        default_options = {'method': 'advanced',
+                           'user_data': None, 
+                           'note': None}
+        
+        self.assertDictEqual(HunterOffense(hunt_style="random").kill_options,
+                             default_options)
+        self.assertDictEqual(HunterOffense(hunt_style="pattern").kill_options,
+                             default_options)
+        self.assertEqual(HunterOffense(hunt_style="random", 
+                                           kill_options={"method": 3}
+                                           ).kill_options["method"],
+                             3)
+        self.assertEqual(HunterOffense(hunt_style="random", 
+                                           kill_options={"method": "basic"}
+                                           ).kill_options["method"],
+                             "basic")
+        self.assertEqual(HunterOffense(hunt_style="random", 
+                                           kill_options={"method": "dumb"}
+                                           ).kill_options["method"],
+                             "dumb")
+        # value of kill_options is not controlled
+        self.assertEqual(HunterOffense(hunt_style="random", 
+                                           kill_options={"method": "foo"}
+                                           ).kill_options["method"],
+                             "foo")
+        # any key/value pairs can technically be added:
+        self.assertEqual(HunterOffense(hunt_style="random", 
+                                           kill_options={"foo": "bar"}
+                                           ).kill_options["foo"],
+                             "bar")
+        
+        # need to test other key/value pairs once we enforce what keys and/or
+        # values are allowed.
+     
+    # Basic method tests (should be performed before property tests below)
+    def test_update_state(self):
+        # In HUNT mode:
+        #     If outcome was a HIT:
+        #         If outcome was a SINK --> stay in HUNT mode
+        #         Otherwise --> go to KILL mode
+        #     If outcome was a MISS --> stay in HUNT mode
+        
+        # In KILL mode:
+        #     If outcome was a HIT:
+        #         If outcome was a SINK --> go to HUNT mode
+        #         Otherwise --> stay in KILL mode
+        #     If outcome was a MISS --> stay in KILL mode
+        hunter = HunterOffense("random")
+        self.assertEqual(hunter.state, Mode.HUNT)
+        self.assertRaises(TypeError, hunter.update_state, None)
+        self.assertRaises(TypeError, hunter.update_state, 1)
+        self.assertRaises(TypeError, hunter.update_state, "foo")
+        self.assertRaises(TypeError, hunter.update_state, [])
+        self.assertRaises(KeyError, hunter.update_state, {})
+        self.assertRaises(KeyError, hunter.update_state, {"foo": "bar"})
+        
+        hunter.update_state(Board.outcome((0,0), False))
+        self.assertEqual(hunter.state, Mode.HUNT)
+        
+        hunter.update_state(Board.outcome((0,0), True, True, 1))
+        self.assertEqual(hunter.state, Mode.HUNT)
+        
+        hunter.update_state(Board.outcome((0,0), True, False))
+        self.assertEqual(hunter.state, Mode.KILL)
+        
+        hunter.update_state(Board.outcome((0,0), False))
+        self.assertEqual(hunter.state, Mode.KILL)
+        
+        hunter.update_state(Board.outcome((0,0), True, False))
+        self.assertEqual(hunter.state, Mode.KILL)
+        
+        hunter.update_state(Board.outcome((0,0), True, True, 1))
+        self.assertEqual(hunter.state, Mode.HUNT)
+        
+    # Property tests
+    
+    def test_state(self):
+        from battleship.offense import Mode
+        hunter = HunterOffense("random")
+        self.assertEqual(hunter.state, hunter._state)
+        self.assertEqual(hunter.state, Mode.HUNT)
+        b = Board(2)
+        b.add_ship(1, (0,0), "N")
+        hunter.update_state(b.incoming_at_coord((1,1)))
+        # ship missed; still in hunt state
+        self.assertEqual(hunter.state, Mode.HUNT)
+        hunter.update_state(b.incoming_at_coord((0,0)))
+        # ship hit; now in kill state
+        self.assertEqual(hunter.state, Mode.KILL)
+        hunter.update_state(b.incoming_at_coord((1,0)))
+        # ship is now sunk; back to hunt state
+        self.assertEqual(hunter.state, Mode.HUNT)
+        
+    def test_first_hit(self):
+        # the first hit in the current state.
+        hunter = HunterOffense("random")
+        self.assertIsNone(hunter.first_hit)
+        b = Board(10)
+        b.add_ship(2, (0,0), "N")
+        hunter.update_state(b.incoming_at_coord((9,9)))
+        self.assertEqual(hunter.first_hit, (9,9))
+        hunter.update_state(b.incoming_at_coord((0,0)))
+        self.assertEqual(hunter.first_hit, (0,0))
+        hunter.update_state(b.incoming_at_coord((0,1)))
+        self.assertEqual(hunter.first_hit, (0,0))
+        hunter.update_state(b.incoming_at_coord((1,0)))
+        self.assertEqual(hunter.first_hit, (0,0))
+        hunter.update_state(b.incoming_at_coord((2,0)))
+        self.assertEqual(hunter.first_hit, (2,0))
+    
+    def test_last_hit(self):
+        hunter = HunterOffense("random")
+        history = []
+        self.assertIsNone(hunter.last_hit(history))
+        history = [Board.outcome((0,0),False)]
+        self.assertIsNone(hunter.last_hit(history))
+        history += [Board.outcome((1,0),True)]
+        self.assertEqual(hunter.last_hit(history), (1,0))
+        history += [Board.outcome((2,0),False)]
+        self.assertEqual(hunter.last_hit(history), (1,0))
+        history += [Board.outcome((3,0),False)]
+        self.assertEqual(hunter.last_hit(history), (1,0))
+        history += [Board.outcome((0,1),True)]
+        self.assertEqual(hunter.last_hit(history), (0,1))
+        history += [Board.outcome((1,1),True,True,1)]
+        self.assertEqual(hunter.last_hit(history), (1,1))
+        history += [Board.outcome((2,1),False)]
+        self.assertEqual(hunter.last_hit(history), (1,1))
+        history += [Board.outcome((2,1),False)]
+        self.assertEqual(hunter.last_hit(history), (1,1))
+        
+    def test_set_to_hunt(self):
+        hunter = HunterOffense("random")
+        hunter._state = Mode.HUNT
+        hunter.set_to_hunt(Board.outcome((5,6),False)) # since state is not changed, first_hit is not updated.
+        self.assertEqual(hunter.state, Mode.HUNT)
+        self.assertIsNone(hunter.first_hit)
+        hunter._state = Mode.KILL
+        hunter.set_to_hunt(Board.outcome((6,7),False))
+        self.assertEqual(hunter.state, Mode.HUNT)
+        self.assertEqual(hunter.first_hit, (6,7))
+        
+    def test_set_to_kill(self):
+        hunter = HunterOffense("random")
+        hunter._state = Mode.HUNT
+        hunter.set_to_kill(Board.outcome((5,6),False)) # this sets first_hit
+        self.assertEqual(hunter.state, Mode.KILL)
+        self.assertEqual(hunter.first_hit, (5,6))
+        hunter._state = Mode.KILL
+        hunter.set_to_kill(Board.outcome((6,7),False)) # no state change, so first_hit is not updated. Still (5,6).
+        self.assertEqual(hunter.state, Mode.KILL)
+        self.assertEqual(hunter.first_hit, (5,6))
+        hunter._state = Mode.HUNT
+        hunter.set_to_kill(Board.outcome((6,7),False)) # now first_hit should update to (6,7) since state went from HUNT to KILL.
+        self.assertEqual(hunter.state, Mode.KILL)
+        self.assertEqual(hunter.first_hit, (6,7))
+        
+    # def test_outcomes_in_current_state(self):
+    #     hunter = HunterOffense()
+    #     self.assertListEqual(hunter.outcomes_in_current_state([]), [])
+    #     outcome = Board.outcome((0,0), False)
+    #     hunter.update_state(outcome)
+    #     history += [outcome]
+        
+    def test_targets_on_line(self):
+        b = Board(10)
+        hunter = HunterOffense("random")
+        
+        # empty grid
+        self.assertEqual(hunter.targets_on_line(b,(4,5),(1,0),False), [(5,5)])
+        self.assertEqual(hunter.targets_on_line(b,(4,5),(-1,0),False), [(3,5)])
+        self.assertEqual(set(hunter.targets_on_line(b,(4,5),(1,0),True)),
+                         set([(3,5), (5,5)]))
+        self.assertEqual(hunter.targets_on_line(b,(4,5),(0,1),False), [(4,6)])
+        self.assertEqual(hunter.targets_on_line(b,(4,5),(0,-1),False), [(4,4)])
+        self.assertEqual(set(hunter.targets_on_line(b,(4,5),(0,1),True)),
+                         set([(4,6), (4,4)]))
+        
+        self.assertEqual(hunter.targets_on_line(b,(4,5),(5,0),False), [(5,5)])
+        
+        # near edge
+        self.assertEqual(hunter.targets_on_line(b,(0,0),(1,0),False), [(1,0)])
+        self.assertEqual(hunter.targets_on_line(b,(0,0),(-1,0),False), [])
+        self.assertEqual(hunter.targets_on_line(b,(0,0),(1,0),True), [(1,0)])
+        
+        # on a ship
+        b.update_target_grid(b.outcome((3,4),True))
+        b.update_target_grid(b.outcome((2,4),False))
+        b.update_target_grid(b.outcome((3,5),True))
+        b.update_target_grid(b.outcome((3,6),True))
+        #
+        self.assertEqual(hunter.targets_on_line(b,(3,4),(1,0),True), [(4,4)])
+        self.assertEqual(set(hunter.targets_on_line(b,(3,4),(0,1),True)), 
+                         set([(3,3), (3,7)]))
+        
+        # if the line encounters a known sunk ship, it does not return a target
+        # coord along that direction.
+        b.update_target_grid(b.outcome((3,7),True,True,4))
+        self.assertEqual(hunter.targets_on_line(b,(3,4),(0,1),True), [(3,3)])
+        b.update_target_grid(b.outcome((3,3),True))
+        self.assertEqual(set(hunter.targets_on_line(b,(3,4),(0,1),True)), 
+                         set([(3,2)]))
+        self.assertEqual(set(hunter.targets_on_line(b,(3,3),(0,1),True)), 
+                         set([(3,2)]))
+        self.assertEqual(set(hunter.targets_on_line(b,(3,3),(1,0),True)), 
+                         set([(2,3), (4,3)]))
+        
+        # near a ship
+        self.assertEqual(set(hunter.targets_on_line(b,(2,3),(0,1),True)), 
+                         set([(2,2)]))
+        self.assertEqual(set(hunter.targets_on_line(b,(2,3),(1,0),True)), 
+                         set([(4, 3), (1, 3)]))
+        # on a miss
+        self.assertEqual(set(hunter.targets_on_line(b,(2,4),(1,0),True)), 
+                         set([(1, 4)]))
+        self.assertEqual(set(hunter.targets_on_line(b,(2,4),(0,1),True)), 
+                         set([(2, 5), (2, 3)]))
+        b.update_target_grid(b.outcome((4,3),True))
+        self.assertEqual(set(hunter.targets_on_line(b,(3,3),(1,0),True)), 
+                         set([(2, 3), (5, 3)]))
+        b.update_target_grid(b.outcome((5,3),True))
+        self.assertEqual(set(hunter.targets_on_line(b,(3,3),(1,0),True)), 
+                         set([(2, 3), (6, 3)]))
+        b.update_target_grid(b.outcome((6,3),True,True,3))
+        self.assertEqual(set(hunter.targets_on_line(b,(3,3),(1,0),True)), 
+                         set([(2, 3)]))
+        
+    def test_random_hunt_targets(self):
+        b = Board(10)
+        h = HunterOffense("random")
+        history = []
+        shots = [(r,c) for r in range(3) for c in range(10)]
+        for coord in shots:
+            outcome = b.outcome(coord, False)
+            history += [outcome]
+            b.update_target_grid(outcome)
+        targets_and_probs = h.random_hunt_targets(b, history)
+        for target, prob in targets_and_probs.items():
+            self.assertNotIn(target, shots)
+            self.assertEqual(prob, 1/(b.size**2 - 10*3))
+            
+    def test_hunt_targets(self):
+        h = HunterOffense("random")
+        b = Board(10)
+        X = h.hunt_targets(b,[])
+        X = list(X.values())
+        self.assertTrue(len(X) == b.size**2)
+        self.assertTrue((X[0] == X[-1]) 
+                        and X[0] > 0 
+                        and X[-1] > 0)
+        
+        h = HunterOffense("pattern", "grid")
+        self.assertRaises(NotImplementedError, 
+                          h.pattern_hunt_targets,
+                          b, [])
+        
+    def test_kill_targets_from_placements(self):
+        #   1 2 3 4 5 6 7 8 9 10
+        # A - - - - - - - - - - 
+        # B - - - - - - - - - -  
+        # C - - - - 0 X - - - - <-- first hit 
+        # D - - - - - X - 0 - - <-- second hit
+        # E - - - 4 4 4 4 - - - 
+        # F - - - - - - - - - - 
+        # G - - - - - - - - - - 
+        # H - - - - - - - - - - 
+        # I - - - - - - - - - - 
+        # J - - - - - - - - - - 
+        
+        b = Board(3)
+        history = []
+        h = HunterOffense("random")
+        outcome = b.outcome((1,1),False)
+        b.update_target_grid(outcome)
+        history = [outcome]
+        self.assertRaises(ValueError, h.kill_targets_from_placements,
+                          b, history) # empty target grid    
+        h.update_state(outcome)
+        self.assertRaises(ValueError, h.kill_targets_from_placements,
+                          b, history) # no hits
+        
+        b = Board(3)
+        history = []
+        outcome = b.outcome((1,1),True)
+        b.update_target_grid(outcome)
+        h.update_state(outcome)
+        history = [outcome]
+        X = h.kill_targets_from_placements(b,history)
+        self.assertSetEqual(set(X), 
+                            set([(2, 1), (1, 2), (0, 1), (1, 0)]))
+        
+        outcome = b.outcome((2,1),True)
+        b.update_target_grid(outcome)
+        h.update_state(outcome)
+        history += [outcome]
+        X = h.kill_targets_from_placements(b,history)
+        self.assertSetEqual(set(X),
+                            set([(0, 1)]))
+        
+    def test_kill_targets_around_last_hit(self):
+        
+        b = Board(10)
+        h = HunterOffense("random")
+        history = []
+        self.assertRaises(ValueError, h.kill_targets_around_last_hit,
+                          b, history) # empty target grid    
+        outcome = b.outcome((1,1),True)
+        b.update_target_grid(outcome)
+        # history needs to be updated before last hit can be found.
+        self.assertRaises(ValueError, h.kill_targets_around_last_hit,
+                          b, history) 
+        
+        b = Board(3)
+        h = HunterOffense("random")
+        history = []
+        outcome = b.outcome((1,1),True)
+        b.update_target_grid(outcome)
+        h.update_state(outcome)
+        history = [outcome]
+        X = h.kill_targets_around_last_hit(b,history)
+        self.assertSetEqual(set(X), 
+                            set([(2, 1), (1, 2), (0, 1), (1, 0)]))
+        
+        outcome = b.outcome((2,1),True)
+        b.update_target_grid(outcome)
+        h.update_state(outcome)
+        history += [outcome]
+        X = h.kill_targets_around_last_hit(b,history)
+        self.assertEqual(set(X), set([(2,0), (2,2)]))
+        
+        b = Board(3)
+        history = []
+        res = b.outcome((2,1),True)
+        b.update_target_grid(res); h.update_state(res); history += [res]
+        res = b.outcome((1,1),True)
+        b.update_target_grid(res); h.update_state(res); history += [res]
+        res = b.outcome((1,0),False)
+        b.update_target_grid(res); h.update_state(res); history += [res]
+        X = h.kill_targets_around_last_hit(b,history)
+        self.assertEqual(set(X), set([(1,2), (0,1)]))
+        self.assertEqual(X[(1,2)], X[(0,1)])
+        
+        
+        
+    def test_kill_targets_from_shape(self):
+        
+        b = Board(10)
+        h = HunterOffense("random")
+        history = []
+        self.assertRaises(ValueError, h.kill_targets_from_shape,
+                          b, history) # empty target grid & history   
+        outcome = b.outcome((1,1),True)
+        b.update_target_grid(outcome)
+        # history needs to be updated before last hit can be found.
+        self.assertRaises(ValueError, h.kill_targets_from_shape,
+                          b, history) 
+        
+        b = Board(3)
+        h = HunterOffense("random")
+        history = []
+        res = b.outcome((1,1),True)
+        b.update_target_grid(res); h.update_state(res); history += [res]
+        X = h.kill_targets_from_shape(b,history)
+        self.assertSetEqual(set(X), {(2, 1), (1, 2), (0, 1), (1, 0)})
+        x0 = X[(0, 1)]
+        self.assertTrue(all([x == x0 for x in X.values()]))
+        res = b.outcome((2,1),True)
+        b.update_target_grid(res); h.update_state(res); history += [res]
+        X = h.kill_targets_from_shape(b,history)
+        self.assertSetEqual(set(X), {(0, 1)})
+        
+    def test_kill_targets(self):
+        
+        # Each kill method should handle the below situation slightly 
+        # differently. 
+        # kill_targets_around_last_hit just returns the untargeted coords
+        #   around the last hit.
+        # kill_targets_from_shape looks at the last hit and the initial hit
+        #   and finds untargeted coords that lie in the same row/col.
+        # kill_targets_from_placements looks for the most likely spot nearest
+        #   the inital hit (based on total # hits and possible placements),
+        #   regardless of where last_hit was.
+        b=Board(4); history=[]; h=HunterOffense("random")
+        oc = b.outcome((2,2),True); 
+        history += [oc]; b.update_target_grid(oc); h.update_state(oc)
+        oc = b.outcome((2,3),True); 
+        history += [oc]; b.update_target_grid(oc); h.update_state(oc)
+        oc = b.outcome((3,2),True); 
+        history += [oc]; b.update_target_grid(oc); h.update_state(oc)
+        K0 = h.kill_targets_around_last_hit(b, history)
+        K1 = h.kill_targets_from_shape(b, history)
+        K2 = h.kill_targets_from_placements(b, history)
+        
+        self.assertSetEqual(set(K0), {(3,3), (3,1)})
+        self.assertSetEqual(set(K1), {(1,2)})
+        self.assertSetEqual(set(K2), {(1,2), (2,1)})
+        
+    def test_target(self):
+        
+        ntest = 100
+        
+        b = Board(4); 
+        history = []; 
+        h = HunterOffense("random", hunt_pattern="random", 
+                          kill_options={"method":"basic"})
+        
+        oc = b.outcome((0,0),False); 
+        history += [oc]; b.update_target_grid(oc); 
+        h.update_state(oc);
+        
+        # fire a bunch of shots
+        targets = Counter([h.target(b, history) for _ in range(ntest)])
+        self.assertTrue(len(targets) > 4)   # this 4 is somewhat arbitrary
+        
+        # upon hitting, the possible targets should be much more restrictive.
+        oc = b.outcome((0,1),True); 
+        history += [oc]; b.update_target_grid(oc); 
+        h.update_state(oc);
+        targets = Counter([h.target(b, history) for _ in range(ntest)])
+        self.assertEqual(len(targets), 2)
+        
+        # for an empty board, we should get all possible coords eventually.
+        b = Board(3); 
+        history = []; 
+        h = HunterOffense("random")
+        targets = Counter([h.target(b, history) for _ in range(3*3*100)])
+        self.assertEqual(len(targets), 3*3)
+        
+    # The following are tested in the test_init method
+    # def test_parse_hunt_options(self):
+    # def test_parse_kill_options(self):
+        
 
 #%% Player
 
-#%% Game
+from battleship.player import HumanPlayer, AIPlayer, DummyPlayer
 
+class TestHumanPlayer(unittest.TestCase):
+    """
+    All Player instances must implement the following attributes and methods:
+    
+    Abstract Properties/Methods:
+    - player_type (property)
+    - take_turn (method)
+    - prepare_fleet (method)
+    
+    This particular subclass has the following properties and methods:
+        
+    Properties
+    - target_select_mode
+    - show_targets
+    
+    Other methods
+    - __init__
+    """
+    
+    def test_init(self):
+        player = HumanPlayer()
+        self.assertEqual(player.player_type, "Human")
+        self.assertEqual(player.target_select_mode, "text")
+        
+    def test_player_type(self):
+        player = HumanPlayer()
+        self.assertEqual(player.player_type, "Human")
+        
+    def test_take_turn(self):
+        print("unit test on HumanPlayer.take_turn requires "
+              "interactive input. Not testing this method currently.")
+        pass
+    
+    def test_prepare_fleet(self):
+        print("unit test on HumanPlayer.prepare_fleet requires "
+              "interactive input if the defense property is not an instance "
+              "of Defense. Not testing this functionality currently.")
+        placements = {1: Placement((0,0), "N", Ship(1).length),
+                      2: Placement((0,1), "N", Ship(2).length),
+                      3: Placement((0,2), "N", Ship(3).length),
+                      4: Placement((4,7), "N", Ship(4).length),
+                      5: Placement((7,0), "W", Ship(5).length)}
+        player = HumanPlayer(defense=placements)
+        self.assertDictEqual(player.defense, placements)
+        player.board = Board(10)
+        player.board.add_fleet(placements)
+        self.assertDictEqual(player.board.ship_placements,
+                             placements)
+        
+    def test_target_select_mode(self):
+        player = HumanPlayer()
+        self.assertEqual(player.target_select_mode, "text")
+        self.assertEqual(player.target_select_mode, player._target_select_mode)
+        # 'text' is the only valid mode as of now.
+        self.assertRaises(ValueError, player.__setattr__, 
+                          "target_select_mode", "foo")
+        
+    def test_input_placements(self):
+        # requires interactive input.
+        print("unit test on HumanPlayer.input_placements requires "
+              "interactive input. Not testing this method currently.")
+        pass
+    
+    def show_targets(self):
+        
+        player = HumanPlayer()
+        self.assertFalse(player.show_targets)
+        player.show_targets = True
+        self.assertTrue(player.show_targets)
+        
+class TestAIPlayer(unittest.TestCase):
+    
+    def test_init(self):
+        player = AIPlayer()
+        self.assertEqual(player.player_type, "AI")
+        player = AIPlayer('a', 'b', 'c')
+        self.assertEqual(player.offense, 'a')
+        self.assertEqual(player.defense, 'b')
+        self.assertEqual(player.name, 'c')
+        self.assertFalse(player.verbose)
+        self.assertListEqual(player.shot_history, [])
+        self.assertListEqual(player.outcome_history, [])
+        self.assertListEqual(player.remaining_targets, [])
+        self.assertIsNone(player._possible_targets)
+        self.assertIsNone(player.board)
+        self.assertIsNone(player.opponent)
+        
+    def test_player_type(self):
+        player = AIPlayer()
+        self.assertEqual(player.player_type, "AI")
+    
+    def test_prepare_fleet(self):
+        player = AIPlayer()
+        self.assertIsNone(player.board)
+        # defense cannot be None for AI player
+        self.assertRaises(ValueError, player.prepare_fleet) 
+        
+        # placement-based defense
+        placements = {1: Placement((0,0),"N",2),
+                      2: Placement((0,1),"N",3)}
+        player = AIPlayer(defense = placements)
+        self.assertIsNone(player.board)
+        player.prepare_fleet()
+        self.assertTrue(player.board)
+        self.assertEqual(len(player.board.fleet), len(placements))
+        self.assertDictEqual(player.board.ship_placements, placements)
+        # check that ocean grid has appropriate ship_type numbers at the
+        # placement coords
+        self.assertEqual(player.board.ocean_grid[placements[1].coords()[-1]], 1)
+        self.assertEqual(player.board.ocean_grid[placements[2].coords()[-1]], 2)
+        
+        # random defense
+        player = AIPlayer(defense = RandomDefense())
+        self.assertIsNone(player.board)
+        player.prepare_fleet()
+        self.assertTrue(player.board)
+        self.assertEqual(len(player.board.fleet), len(Ship.data))
+        placements = player.board.ship_placements
+        # check that ocean grid has appropriate ship_type numbers at the
+        # placement coords
+        for k in Ship.types:
+            for coord in placements[k].coords():
+                self.assertEqual(player.board.ocean_grid[coord], k)
+        
+    def test_take_turn(self):
+        # "take_turn" should do the same thing as fire_at_target and update
+        # the offense.
+        ship_type = 2
+        ship_len = Ship.data[ship_type]["length"]
+        p1 = AIPlayer(offense = HunterOffense("random"), 
+                      defense = {ship_type: Placement((0,0), "N", ship_len)})
+        p2 = AIPlayer(offense = HunterOffense("random"), 
+                      defense = {ship_type: Placement((0,9), "N", ship_len)})
+        p1.prepare_fleet()
+        p2.prepare_fleet()
+        p1.opponent = p2
+        
+        # test that take_turn does all of the same actions as fire_at_target
+        self.assertTrue(np.all(p1.board.target_grid 
+                               == constants.TargetValue.UNKNOWN))
+        self.assertEqual(len(p1.remaining_targets), 100)
+        self.assertListEqual(p1.outcome_history, [])
+        self.assertIsNone(p1.last_target)
+        self.assertIsNone(p1.last_outcome)
+        self.assertTrue(p1.offense.state, Mode.HUNT)    # Hunt mode (offense)
+        
+        p1.take_turn()  # pick a random target to fire at
+        
+        self.assertTrue(np.sum(p1.board.target_grid 
+                               > constants.TargetValue.UNKNOWN) == 1)
+        row,col = np.where(p1.board.target_grid > constants.TargetValue.UNKNOWN)
+        coord = (row[0], col[0])
+        self.assertEqual(len(p1.remaining_targets), 99)
+        self.assertTupleEqual(p1.last_target, coord)
+        self.assertFalse(p1.last_target in p1.remaining_targets)
+        self.assertFalse(coord in p1.remaining_targets)
+        self.assertEqual(len(p1.outcome_history), 1)
+        self.assertTupleEqual(p1.outcome_history[0]["coord"], coord)
+        
+        # check if offense can be put into kill mode (i.e., that offense
+        # is updated))
+        p1 = AIPlayer(offense = HunterOffense("random"), 
+                      defense = {ship_type: Placement((0,0), "N", ship_len)})
+        p1.prepare_fleet()
+        p2 = AIPlayer(offense = HunterOffense("random"), 
+                      defense = RandomDefense())
+        p2.prepare_fleet()
+        p1.opponent = p2
+        
+        self.assertEqual(p1.offense.state, Mode.HUNT)
+        p1.take_turn()
+        count = 0
+        while not p1.last_outcome['hit']:
+            self.assertEqual(p1.offense.state, Mode.HUNT)
+            p1.take_turn()
+            if count >= 100:
+                raise Exception("No ships found after 100 shots.")
+                break
+            count += 1
+        self.assertEqual(p1.offense.state, Mode.KILL)
+    
+    # Below methods belong to Player class, but need a concrete instance
+    # to test.
+    def test_name(self):
+        player = AIPlayer('a','b','Eve')
+        self.assertEqual(player.name, 'Eve')
+        player = AIPlayer(name='Eve')
+        self.assertEqual(player.name, 'Eve')   
+        
+    def test_offense(self):
+        player = AIPlayer('x')
+        self.assertEqual(player.offense, 'x')
+        player = AIPlayer(offense = 'x')
+        self.assertEqual(player.offense, 'x')
+        player = AIPlayer(defense = 'y', offense = 'x')
+        self.assertEqual(player.offense, 'x')
+        offense = HunterOffense("random")
+        player = AIPlayer(offense)
+        self.assertIs(offense, player.offense)
+        
+    def test_defense(self):
+        player = AIPlayer('x')
+        self.assertEqual(player.defense, None)
+        player = AIPlayer(defense = 'x')
+        self.assertEqual(player.defense, 'x')
+        player = AIPlayer(defense = 'y', offense = 'x')
+        self.assertEqual(player.defense, 'y')
+        defense = RandomDefense("cluster")
+        player = AIPlayer(defense = defense)
+        self.assertIs(defense, player.defense)
+        
+    def test_outcome_history(self):
+        player = AIPlayer()
+        self.assertEqual(player._outcome_history, player.outcome_history)
+        
+    def test_add_outcome_to_history(self):
+        
+        player = AIPlayer()
+        outcome = Board.outcome((3,3), True, True, 2)
+        self.assertEqual(len(player.outcome_history), 0)
+        player.add_outcome_to_history(outcome)
+        self.assertEqual(len(player.outcome_history), 1)
+        self.assertDictEqual(player.outcome_history[0], outcome)
+        # Input dict does not have to be an outcome dictionary
+        bad_outcome = {"foo": "bar"}
+        player.add_outcome_to_history(bad_outcome)
+        self.assertEqual(len(player.outcome_history), 2)
+        self.assertDictEqual(player.outcome_history[-1], bad_outcome)
+        
+    def test_board(self):
+        player = AIPlayer()
+        self.assertIsNone(player.board)
+        
+        b = Board(10)
+        b.add_ship(5, (2,2), "N")
+        b.update_target_grid(Board.outcome((0,0),False))
+        
+        player.board = b
+        self.assertIs(player.board, b)
+        self.assertTrue(5 in player.board.fleet)
+        for k in [1,2,3,4]:
+            self.assertFalse(k in player.board.fleet)
+        
+    def test_opponent(self):
+        p1 = AIPlayer(name = "Frances")
+        p2 = AIPlayer(name = "Gloria")
+        self.assertEqual(p1.name, "Frances")
+        self.assertEqual(p2.name, "Gloria")
+        p1.opponent = p2
+        self.assertIs(p1.opponent, p2)
+        self.assertIs(p2.opponent, p1)
+        self.assertEqual(p1.opponent.name, "Gloria")
+        self.assertEqual(p2.opponent.name, "Frances")
+        
+    def test_remaining_targets(self):
+        board_size = 8
+        player = AIPlayer()
+        self.assertListEqual(player.remaining_targets, [])
+        player.board = Board(board_size)
+        self.assertEqual(len(player.remaining_targets), board_size**2)
+        for r in range(board_size):
+            for c in range(board_size):
+                self.assertTrue((r,c) in player.remaining_targets)
+        self.assertTrue((board_size, board_size) not in player.remaining_targets)
+        p2 = AIPlayer()
+        p2.board = Board(board_size)
+        player.opponent = p2
+        target = (1,2)
+        player.fire_at_target(target)
+        self.assertFalse(target in player.remaining_targets)
+        
+    def test_verbose(self):
+        player = AIPlayer()
+        self.assertTrue(player.verbose == player._verbose)
+        self.assertFalse(player.verbose)
+        player.verbose = True
+        self.assertTrue(player.verbose)
+        
+    # Computed Properties
+    def test_shot_history(self):
+        p1 = AIPlayer()
+        p2 = AIPlayer()
+        self.assertListEqual(p1.shot_history, [])
+        
+        p1.board = Board(10)
+        p2.board = Board(10)
+        p2.board.add_ship(1,(0,0),"N")
+        p1.opponent = p2
+        
+        self.assertListEqual(p1.shot_history, [])
+        p1.fire_at_target((0,1))
+        p1.fire_at_target((0,0))
+        self.assertListEqual(p1.shot_history, [(0,1), (0,0)])
+        
+    def test_last_target(self):
+        p1 = AIPlayer()
+        p2 = AIPlayer()
+        self.assertIsNone(p1.last_target)
+        
+        p1.board = Board(10)
+        p2.board = Board(10)
+        p2.board.add_ship(1,(0,0),"N")
+        p1.opponent = p2
+        
+        self.assertIsNone(p1.last_target)
+        p1.fire_at_target((0,1))
+        self.assertTupleEqual(p1.last_target, (0,1))
+        p1.fire_at_target((0,0))
+        self.assertTupleEqual(p1.last_target, (0,0))
+        
+    def test_last_outcome(self):
+        player = AIPlayer()
+        self.assertIsNone(player.last_outcome)
+        outcome = Board.outcome((3,3), True, True, 2)
+        player.add_outcome_to_history(outcome)
+        self.assertEqual(type(player.last_outcome), dict)
+        self.assertDictEqual(player.last_outcome, outcome)
+        outcome = Board.outcome((4,4), False)
+        player.add_outcome_to_history(outcome)
+        self.assertDictEqual(player.last_outcome, outcome)
+        
+        # Input dict does not have to be an outcome dictionary
+        bad_outcome = {"foo": "bar"}
+        player.add_outcome_to_history(bad_outcome)
+        self.assertDictEqual(player.last_outcome, bad_outcome)
+        self.assertDictEqual(player.last_outcome, player.outcome_history[-1])
+        
+    # Other methods
+    def test_reset(self):
+        p1 = AIPlayer()
+        p1.board = Board(10)
+        p2 = AIPlayer()
+        p2.board = Board(10)
+        p2.board.add_ship(1,(0,0),"N")
+        p1.opponent = p2
+        
+        self.assertTrue(len(p2.board.fleet) > 0)
+        p2.reset()
+        self.assertEqual(len(p2.board.fleet), 0)
+        
+        p2.board.add_ship(1,(0,0),"N")
+        p1.fire_at_target((0,0))
+        p2.fire_at_target((1,0))
+        self.assertTrue(np.any(p2.board.target_grid 
+                               != constants.TargetValue.UNKNOWN))
+        self.assertTrue(p2.board.damage_at_coord((0,0)) == 1)
+        self.assertTrue(len(p2.remaining_targets) == 99)
+        self.assertTrue(len(p2.outcome_history) == 1)
+        
+        p2.reset()
+        self.assertTrue(np.all(p2.board.target_grid 
+                               == constants.TargetValue.UNKNOWN))
+        for coord in p2.board.all_coords():
+            self.assertEqual(p2.board.damage_at_coord(coord), 0)
+        self.assertTrue(len(p2.remaining_targets) == 100)
+        self.assertTrue(len(p2.outcome_history) == 0)
+        
+    def test_copy_history_from(self):
+        p1 = AIPlayer()
+        p1.board = Board(10)
+        p2 = AIPlayer()
+        p2.board = Board(10)
+        p2.board.add_ship(1,(0,0),"N")
+        p1.opponent = p2
+        p1.fire_at_target((0,0))
+        p1.fire_at_target((0,1))
+        p1._game_history = "foobar"
+        self.assertEqual(len(p1.outcome_history), 2)
+        self.assertEqual(len(p1.remaining_targets), 98)
+        p3 = AIPlayer()
+        p3.board = Board(10)
+        self.assertEqual(len(p3.outcome_history), 0)
+        self.assertEqual(len(p3.remaining_targets), 100)
+        self.assertIsNone(p3._game_history)
+        p3.copy_history_from(p1)
+        self.assertEqual(len(p3.outcome_history), 2)
+        self.assertListEqual(p3.outcome_history, p1.outcome_history)
+        self.assertEqual(len(p3.remaining_targets), 98)
+        self.assertListEqual(p3.remaining_targets, p1.remaining_targets)
+        self.assertEqual(p3._game_history, p1._game_history)
+        self.assertEqual(p3._game_history, "foobar")
+        
+    def test_is_alive(self):
+        p1 = AIPlayer()
+        p1.board = Board(10)
+        p1.board.add_ship(1,(0,0),"N")
+        self.assertTrue(p1.is_alive())
+        p1.board.incoming_at_coord((0,0))
+        p1.board.incoming_at_coord((1,0))
+        self.assertFalse(p1.is_alive())
+        
+    def test_fire_at_target(self):
+        p1 = AIPlayer(HunterOffense("random"))
+        p1.board = Board(10)
+        p2 = AIPlayer()
+        p2.board = Board(10)
+        p2.board.add_ship(1,(0,0),"N")
+        p1.opponent = p2
+        
+        self.assertEqual(p1.board.target_grid[(0,0)], 
+                         constants.TargetValue.UNKNOWN)
+        self.assertEqual(len(p1.remaining_targets), 100)
+        self.assertTrue((0,0) in p1.remaining_targets)
+        self.assertListEqual(p1.outcome_history, [])
+        self.assertTrue(p1.offense.state, Mode.HUNT)    # Hunt mode
+        
+        p1.fire_at_target((0,0))
+        self.assertEqual(p1.board.target_grid[(0,0)], 
+                         constants.TargetValue.HIT)
+        self.assertEqual(len(p1.remaining_targets), 99)
+        self.assertFalse((0,0) in p1.remaining_targets)
+        self.assertEqual(len(p1.outcome_history), 1)
+        self.assertTrue(p1.offense.state, Mode.KILL)    # Kill mode
+        
+        p1.fire_at_target((1,0))
+        self.assertTrue(p1.board.target_grid[(1,0)] >= 1) # Sunk patrol boat
+        self.assertEqual(len(p1.remaining_targets), 98)
+        self.assertFalse((1,0) in p1.remaining_targets)
+        self.assertEqual(len(p1.outcome_history), 2)
+        self.assertTrue(p1.offense.state, Mode.HUNT)    # Hunt mode
+        
+    def test_place_fleet_using_defense(self):
+        p1 = AIPlayer(defense = RandomDefense())
+        # Must create a board before placing fleet
+        self.assertRaises(AttributeError, 
+                          p1.place_fleet_using_defense, p1.defense)
+        p1.board = Board(10)
+        self.assertTrue(len(p1.board.fleet) == 0)
+        self.assertTrue(np.sum(p1.board.ocean_grid.flatten()) == 0)
+        p1.place_fleet_using_defense(p1.defense)
+        self.assertTrue(len(p1.board.fleet) == 5)
+        self.assertTrue(len(p1.board.ship_placements) == 5)
+        self.assertTrue(np.sum(p1.board.ocean_grid.flatten()) >= 1)
+        
+    def test_show_possible_targets(self):
+        pass
+    
+    def test_stats(self):
+        # stats returns a dict with specific keys
+        quantities = {'hits', 'nshots', 'ships_mean', 'ships_sank', 
+                      'ships_var', 'shots_mean', 'shots_var'}
+        p1 = AIPlayer(defense=RandomDefense(), offense=HunterOffense("random"))
+        p1.prepare_fleet()      
+        stats = p1.stats()
+        self.assertSetEqual(set(stats.keys()), quantities)
+        self.assertSetEqual(quantities.difference(set(stats.keys())), 
+                            set())
+        # check individual quantities
+        self.assertEqual(stats['nshots'], 0)
+        self.assertEqual(len(stats['hits']), 0)
+        self.assertEqual(len(stats['ships_sank']), 0)
+        self.assertIsNone(stats['shots_mean'])
+        self.assertIsNone(stats['shots_var'])
+        self.assertEqual(len(stats['ships_mean']), 2) # row/col center of mass
+        self.assertEqual(len(stats['ships_var']), 2) # row/col variances
+        self.assertTrue(np.all(stats['ships_mean'] > 0)) # row/col center of mass
+        self.assertTrue(np.all(stats['ships_var'] > 0)) # row/col variances
+        
+        p2 = AIPlayer(defense=RandomDefense(), offense=HunterOffense("random"))
+        p1.opponent = p2 
+        p2.prepare_fleet()
+        p1.fire_at_target((0,0))
+        p2.fire_at_target((0,0))
+        p1.fire_at_target(p2.board.ship_placements[1].coords()[0])
+        p2.fire_at_target(p1.board.ship_placements[1].coords()[0])
+        stats = p1.stats()
+        
+        # Make sure taking turns does not affect stat keys
+        self.assertSetEqual(set(stats.keys()), quantities)
+        self.assertSetEqual(quantities.difference(set(stats.keys())), 
+                            set())
+        self.assertSetEqual(set(p2.stats().keys()), quantities)
+        self.assertSetEqual(quantities.difference(set(p2.stats().keys())), 
+                            set())
+        # check individual quantities
+        self.assertEqual(stats['nshots'], 2)
+        self.assertListEqual(list(stats['hits']), [False, True])
+        self.assertEqual(len(stats['ships_sank']), 0)
+        self.assertEqual(len(stats['ships_mean']), 2) # row/col center of mass
+        self.assertEqual(len(stats['ships_var']), 2) # row/col variances
+        self.assertTrue(np.all(stats['ships_mean'] > 0)) # row/col center of mass
+        self.assertTrue(np.all(stats['ships_var'] > 0)) # row/col variances
+        
+#%% Game
+from battleship.game import Game
+
+class TestGame(unittest.TestCase):
+    
+    def test_init(self):
+        game = Game('a','b')
+        self.assertEqual(game.player1, 'a')
+        self.assertEqual(game.player2, 'b')
+        self.assertTrue(isinstance(game.salvo, bool))
+        self.assertEqual(game.salvo, False)
+        self.assertEqual(game.game_id, None)
+        self.assertTrue(isinstance(game.verbose, bool))
+        self.assertEqual(game.verbose, True)
+        self.assertTrue(isinstance(game.show, bool))
+        self.assertEqual(game.show, False)
+        
+        self.assertEqual(game.turn_count, 0)
+        self.assertIsNone(game.winner)
+        self.assertIsNone(game.loser)
+        self.assertEqual(game.ready, False)
+        
+        self.assertRaises(TypeError, Game, 'a','b','c') # salvo parameter must be a bool
+        
+    def test_salvo(self):
+        game = Game('foo','bar')
+        game.salvo = True
+        self.assertTrue(game.salvo)
+        game.salvo = False
+        self.assertTrue(game.salvo)
+        self.assertRaises(TypeError, game.__setattr__, "salvo", "NOT ALLOWED")
+        self.assertRaises(TypeError, game.__setattr__, "salvo", 0)
+        
+    def test_game_id(self):
+        game = Game('foo','bar')
+        game.game_id = '12345678'
+        self.assertEqual(game.game_id, '12345678')
+        game.game_id = 12345678
+        self.assertEqual(game.game_id, 12345678)
+        
+    def test_verbose(self):
+        game = Game('foo','bar')
+        game.verbose = True
+        self.assertTrue(game.verbose)
+        game.verbose = False
+        self.assertFalse(game.verbose)
+        self.assertRaises(TypeError, game.__setattr__, "verbose", "NOT ALLOWED")
+        self.assertRaises(TypeError, game.__setattr__, "verbose", 0)
+        
+    def test_show(self):
+        game = Game('foo','bar')
+        game.show = True
+        self.assertTrue(game.show)
+        game.show = False
+        self.assertFalse(game.show)
+        self.assertRaises(TypeError, game.__setattr__, "show", "NOT ALLOWED")
+        self.assertRaises(TypeError, game.__setattr__, "show", 0)
+        
+    def test_setup(self):
+        p1 = DummyPlayer()
+        p2 = DummyPlayer()
+        game = Game(p1, p2)
+        # p1 and p2 need to be reset since their fleets are placed
+        self.assertRaises(ValueError, game.setup) 
+        game.player1.reset()
+        game.player1.reset()
+        game.setup()
+        self.assertEqual(len(game.player1.board.fleet), 5)
+        self.assertEqual(len(game.player1.board.fleet), 5)
+        self.assertEqual(np.sum(game.player1.board.target_grid !=
+                                constants.TargetValue.UNKNOWN), 0)
+        self.assertEqual(np.sum(game.player2.board.target_grid !=
+                                constants.TargetValue.UNKNOWN), 0)
+        self.assertTrue(game.ready)
+        self.assertIsNone(game.winner)
+        self.assertIsNone(game.loser)
+        self.assertEqual(game.turn_count, 0)
+        
+    def test_reset(self):
+        p1 = DummyPlayer()
+        p2 = DummyPlayer()
+        p1.reset()
+        p2.reset()
+        game = Game(p1, p2)
+        game.setup()
+
+        self.assertEqual(len(game.player1.board.fleet), 5)
+        self.assertEqual(len(game.player2.board.fleet), 5)
+        game.play_one_turn(game.player1, game.player2)
+        self.assertEqual(np.sum(game.player1.board.target_grid !=
+                                constants.TargetValue.UNKNOWN), 1)
+        self.assertEqual(np.sum(game.player2.board.target_grid !=
+                                constants.TargetValue.UNKNOWN), 1)
+        self.assertEqual(game.turn_count, 1)
+        self.assertFalse(game.ready)
+        
+        game.reset()
+        self.assertEqual(len(game.player1.board.fleet), 0)
+        self.assertEqual(len(game.player2.board.fleet), 0)
+        self.assertEqual(np.sum(game.player1.board.target_grid !=
+                                constants.TargetValue.UNKNOWN), 0)
+        self.assertEqual(np.sum(game.player2.board.target_grid !=
+                                constants.TargetValue.UNKNOWN), 0)
+        self.assertEqual(game.turn_count, 0)
+        self.assertFalse(game.ready) # need to prepare fleets        
+        
+    def test_play_one_turn(self): 
+        p1 = DummyPlayer()
+        p2 = DummyPlayer()
+        p1.reset()
+        p2.reset()
+        game = Game(p1, p2)
+        game.setup()
+        
+        keep_going = game.play_one_turn(game.player1, game.player2)
+        self.assertTrue(keep_going)
+        self.assertEqual(np.sum(game.player1.board.target_grid !=
+                                constants.TargetValue.UNKNOWN), 1)
+        self.assertEqual(np.sum(game.player2.board.target_grid !=
+                                constants.TargetValue.UNKNOWN), 1)
+        self.assertEqual(game.turn_count, 1)
+        
+        for n in range(2,10):
+            keep_going = game.play_one_turn(game.player1, game.player2)
+            self.assertTrue(keep_going)
+            self.assertEqual(game.turn_count, n)
+        
+    def test_play(self):    
+        p1 = DummyPlayer()
+        p2 = DummyPlayer()
+        p1.reset()
+        p2.reset()
+        game = Game(p1, p2)
+        
+        outcome = game.play(1, 100)     # 100 max turns, in case something is off with parameter inputs
+        self.assertTrue('winner' in outcome)
+        self.assertTrue('loser' in outcome)
+        self.assertTrue('first_move' in outcome)
+        self.assertTrue('first_player' in outcome)
+        self.assertTrue('second_player' in outcome)
+        self.assertTrue('turn_count' in outcome)
+        self.assertTrue('max_turns' in outcome)
+        self.assertTrue('tie' in outcome)
+        self.assertDictEqual(outcome,
+                             {'winner': None,
+                              'loser': None,
+                              'first_move': 1,
+                              'first_player': p1,
+                              'second_player': p2,
+                              'turn_count': 0,
+                              'max_turns': 100,
+                              'tie': False})
+        
+        game.setup()
+        outcome = game.play(1, 100)
+        self.assertDictEqual(outcome,
+                             {'winner': None,
+                              'loser': None,
+                              'first_move': 1,
+                              'first_player': p1,
+                              'second_player': p2,
+                              'turn_count': 100,
+                              'max_turns': 100,
+                              'tie': True})
+        
+        game.reset()
+        game.setup()
+        outcome = game.play(2, 100)
+        self.assertDictEqual(outcome,
+                             {'winner': None,
+                              'loser': None,
+                              'first_move': 2,
+                              'first_player': p2,
+                              'second_player': p1,
+                              'turn_count': 100,
+                              'max_turns': 100,
+                              'tie': True})
+        
+        self.assertRaises(ValueError, game.play, 3)
+        
+        game = Game(AIPlayer(HunterOffense("random"), 
+                             RandomDefense("random"),
+                             name="Frances"), 
+                    AIPlayer(HunterOffense("random"), 
+                             RandomDefense("random"),
+                             name="Albert"))
+        game.setup()
+        outcome = game.play(1, 1000)
+        self.assertTrue(((outcome['winner'] == game.player1) 
+                         and (outcome['loser'] == game.player2))
+                        or ((outcome['winner'] == game.player2) 
+                            and (outcome['loser'] == game.player1)))
+        self.assertTrue(outcome['first_player'] == game.player1)
+        self.assertTrue(outcome['turn_count'] > 0)
+        self.assertTrue(outcome['turn_count'] <= 1000)
+        self.assertTrue(outcome['max_turns'] == 1000)
+        if outcome['turn_count'] < outcome['max_turns']:
+            self.assertFalse(outcome['tie'])
+        
+                        
+        
+    def test_report_turn_outcome(self):    
+        pass
+    
+    def test_print_outcome(self):    
+        pass
+        
 #%% Viz
 
 #%% utils

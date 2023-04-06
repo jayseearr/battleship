@@ -490,7 +490,7 @@ class HunterOffense(Offense):
                                                               hunt_options)
         self._kill_options = HunterOffense.parse_kill_options(kill_options)
         
-        self._state = Mode.HUNT
+        #self._state = Offense.Mode.HUNT
         self._initial_hit = None  
         self._target_probs = None
         
@@ -523,36 +523,36 @@ class HunterOffense(Offense):
         """
         super().reset()
         temp_offense = HunterOffense(self._hunt_style)
-        self._state = temp_offense.state
-        self._first_initial_hit = temp_offense.initial_hit
+        #self._state = temp_offense.state
+        #self._first_initial_hit = temp_offense.initial_hit
         self._outcome_history = temp_offense.outcome_history
         
         
     ### Properties ###
     
-    @property
-    def state(self):
-        return self._state
+    # @property
+    # def state(self):
+    #     return self._state
     
-    @state.setter
-    def state(self, value):
-        if value is Mode.HUNT or value is Mode.KILL:
-            self._state = value
-        else:
-            raise ValueError("state must be a valid Mode value.")
+    # @state.setter
+    # def state(self, value):
+    #     if value is Mode.HUNT or value is Mode.KILL:
+    #         self._state = value
+    #     else:
+    #         raise ValueError("state must be a valid Mode value.")
             
-    @property
-    def initial_hit(self):
-        return self._initial_hit
+    # @property
+    # def initial_hit(self):
+    #     return self._initial_hit
     
-    @initial_hit.setter
-    def initial_hit(self, value):
-        if value == None:
-            self._initial_hit = None
-        elif isinstance(value, (tuple, Coord)):
-            self._initial_hit = value
-        else:
-            raise TypeError("initial_hit coord needs to be a tuple or Coord.")
+    # @initial_hit.setter
+    # def initial_hit(self, value):
+    #     if value == None:
+    #         self._initial_hit = None
+    #     elif isinstance(value, (tuple, Coord)):
+    #         self._initial_hit = value
+    #     else:
+    #         raise TypeError("initial_hit coord needs to be a tuple or Coord.")
             
     @property
     def hunt_options(self):
@@ -591,8 +591,8 @@ class HunterOffense(Offense):
     @property
     def target_probs(self):
         return self._target_probs
-       
-        
+    
+    
     ### Abstract Method Definitions ###
     
     def target(self, board=None, outcome_history=None):
@@ -633,18 +633,11 @@ class HunterOffense(Offense):
             outcome_history = self.outcome_history
         # *** ^^^^^^^^ ***
             
-        if self.state is Mode.HUNT:
-            self._target_probs = self.hunt_targets(board, outcome_history)
-        elif self.state is Mode.KILL:
+        open_target = self.last_open_hit(board, outcome_history)
+        if open_target:
             self._target_probs = self.kill_targets(board, outcome_history)
         else:
-            print(self.state, Mode.HUNT, Mode.KILL)
-            print(self.state is Mode.KILL)
-            print(self.state is Mode.HUNT)
-            print(self.state.value, Mode.KILL.value, Mode.HUNT.value)
-            print(id(self.state), id(Mode.KILL), id(Mode.HUNT))
-
-            raise ValueError("Invalid state value (multiple instance of Mode)")
+            self._target_probs = self.hunt_targets(board, outcome_history)
         
         # As a final failsafe, if not targets have been selected return one
         # selected with uniform probability from the untargeted spaces.
@@ -658,7 +651,26 @@ class HunterOffense(Offense):
         return target
     
     
-    ### HUNT State Primary Methods ###
+    def update_state(self, outcome):
+        """
+        Updates the HunterOffense state; since this offense chooses targets
+        based on history, no state variables are required; 
+        this method does nothing.
+
+        Parameters
+        ----------
+        outcome : dict
+            Outcome dictionary.
+
+        Returns
+        -------
+        None.
+
+        """
+        pass
+    
+    
+    ### Hunt Methods ###
     
     def hunt_targets(self, board=None, outcome_history=None):
         """
@@ -696,19 +708,8 @@ class HunterOffense(Offense):
             board = self.board
         if outcome_history == None:
             outcome_history = self.outcome_history
-        # *** ^^^^^^^^ ***
-        
-        # Check if there are unresolved hits anywhere on the board. 
-        # If so, go to kill mode and get target probs from kill_target method.
-        # open_hits = board.target_grid_is(values=constants.TargetValue.HIT,
-        #                                  output='coords')
-        # if open_hits:
-        #     self.set_to_kill(board.outcome(utils.random_choice(list(open_hits)),
-        #                                    True))
-        #     targets_with_probs = self.kill_targets(board, outcome_history)
-        #     return self.normalized_probs(targets_with_probs)
-        
-        # If the hunt is on, get target probabilities:
+            
+        # Get target probabilities based on pattern:
         if self._hunt_style == "random":
             targets_with_probs = self.random_hunt_targets(board, outcome_history)
         elif self._hunt_style == "pattern":
@@ -719,6 +720,8 @@ class HunterOffense(Offense):
             
         return self.normalized_probs(targets_with_probs)
     
+    
+    # Pattern Hunt Methods
     
     def pattern_hunt_targets(self, board=None, outcome_history=None):
         """
@@ -756,6 +759,8 @@ class HunterOffense(Offense):
         raise NotImplementedError("This method is not yet implemented.")
         
         
+    # Random Hunt Methods
+    
     def random_hunt_targets(self, board=None, outcome_history=None):
         """
         Returns possible target coordinates and associated probabilities for 
@@ -843,48 +848,19 @@ class HunterOffense(Offense):
         probs = probs / np.sum(probs)
         targets = [target.rowcol for target in targets]
         return dict(zip(targets, probs))
-                    
     
-    ### KILL State Targeting Methods ###
+    
+    ### Kill Methods ###
     
     def kill_targets(self, board=None, outcome_history=None):
-        """
-        Returns possible target coordinates and associated probabilities for 
-        choosing each target coordinate. Probabilities are based on the goal
-        of sinking the most recently hit ship.
-
-        Parameters
-        ----------
-        board : Board
-            The board whose target grid (vertical grid) should be used to
-            determinate a kill target coordinate.
-        outcome_history : list
-            A list of outcome dictionaries, with most recent outcome last.
-            
-            Each element of outcome_history should be a dictionary with the 
-            following key/value pairs:
-                'coord': tuple (row, col); the targeted coordinate.
-                'hit': bool; True if shot hit a ship.
-                'sunk': bool; True if shot resulted in sinking a ship.
-                'sunk_ship_type': ShipType; the reported type of the hit ship, 
-                    if a ship was sunk. None if no ship was sunk.
-                'inferred_ship_type': ShipType; for future use.
-
-        Returns
-        -------
-        targets_with_probs : dict
-            A dictionary with keys equal to each possible target tuple (i.e.,
-            a (row,col) tuple) and value equal to the probability that the 
-            Hunter should choose that coordinate as its target.
-
-        """
+        
         #** For debug purposes only **
         if board == None:
             board = self.board
         if outcome_history == None:
             outcome_history = self.outcome_history
         # *** ^^^^^^^^ ***
-                
+        
         if self.kill_options['method'] == 'dumb':
             targets_with_probs = self.kill_targets_around_last_hit(board,
                                                             outcome_history)
@@ -896,7 +872,7 @@ class HunterOffense(Offense):
         else: # method == 'basic'
             targets_with_probs = self.kill_targets_from_shape(board, 
                                                               outcome_history)
-        
+            
         # If no kill targets are found, revert to HUNT mode and get a hunt
         # target.
         if not targets_with_probs:
@@ -905,29 +881,8 @@ class HunterOffense(Offense):
             
         return self.normalized_probs(targets_with_probs)
     
-    """
-    There are 3 kill_targets_... methods. They should function as follows:
-        
-    1. kill_targets_around_last_hit
-        Target any untargeted spaces around the last hit.
-        If the last hit has no adjacent untargeted spaces, find adjacent
-        hits, and look for untargeted spaces around those hits. If there
-        are still no untargeted spaces, go to the next most adjacent hits, 
-        and repeat. If no adjacent hits can be found, return {}.
-        
-    2. kill_targets_from _shape
-        Target spaces that are linearly connected and adjacent to the last hit
-        or the initial hit in this state.
-        
-    3. 
     
-    If a kill_target method returns {} (i.e., no targets found), the offense
-    should be put back in hunt state. 
-    
-    Anytime the state is changing to hunt, we should check if there are any
-    unresolved hits; if so, change to kill mode, centered on one of the 
-    unresolved targets.
-    """
+    # Dumb Method
     
     def kill_targets_around_last_hit(self, board=None, outcome_history=None):
         """
@@ -959,16 +914,12 @@ class HunterOffense(Offense):
             Hunter should choose that coordinate as its target.
 
         """
+        
         #** For debug purposes only **
         if board == None:
             board = self.board
         if outcome_history == None:
             outcome_history = self.outcome_history
-        # *** ^^^^^^^^ ***
-        
-        if self.state != Mode.KILL:
-            Warning("Received a call to kill_targets_around_last_hit "
-                    " while offense is not in KILL state.")
             
         # Go backward through hits in the history and find adjacent untargeted
         # coords.
@@ -987,351 +938,9 @@ class HunterOffense(Offense):
             targets_with_probs = {}
         return targets_with_probs
     
-        # targets = []
-        # already_considered = []
-        # hit = self.last_hit(outcome_history)
-        # targets = board.targets_around(hit, untargeted=True)
-        # already_considered += [hit]
-        
-        # while not targets:
-        #     targets = []
-        #     hits = [hit for hit in 
-        #             board.targets_around(hit, values=constants.TargetValue.HIT)
-        #             if hit not in already_considered]
-        #     already_considered += hits
-        #     if not hits:
-        #         break
-        #     for hit in hits:
-        #         targets += board.targets_around(hit, untargeted=True)
     
+    # Advanced Method
     
-    def open_hits(self, board=None, outcome_history=None):
-        """
-        Returns a list of coordinates where open hits are located. A hit is
-        'open' if it cannot be associated with a specific ship type. The list
-        is ordered so that the most recent open hit is last.
-
-        Parameters
-        ----------
-        board : Board, optional
-            The board with target grid used to determine open hits. 
-            The default is None, in which case the Hunter's board property
-            is used (if it has one).
-        outcome_history : TYPE, optional
-            The outcome history of a player. Used to determine ordering of
-            the open hits.
-            The default is None, in which case the Hunter's outcome_history
-            property is used (if it has one).
-
-        Returns
-        -------
-        open_hits : list
-            A list of coordinate tuples.
-
-        """
-        #** For debug purposes only **
-        if board == None:
-            board = self.board
-        if outcome_history == None:
-            outcome_history = self.outcome_history
-        # *** ^^^^^^^^ ***
-        
-        open_hits = []
-        for outcome in outcome_history:
-            target = outcome['coord']
-            if board.target_grid[target] == constants.TargetValue.HIT:
-                open_hits += [target]
-        return open_hits
-        
-        
-    def kill_targets_from_shape(self, board=None, outcome_history=None):
-        """
-        Returns a dict of target coordinates and probabilities (which are
-        uniform, in this case) based on logically determining the likely
-        location of a target ship based on the board's target grid.
-
-        Parameters
-        ----------
-        board : Board
-            The board whose target grid (vertical grid) should be used to
-            determinate a kill target coordinate.
-        outcome_history : list
-            A list of outcome dictionaries, with most recent outcome last.
-            
-            Each element of outcome_history should be a dictionary with the 
-            following key/value pairs:
-                'coord': tuple (row, col); the targeted coordinate.
-                'hit': bool; True if shot hit a ship.
-                'sunk': bool; True if shot resulted in sinking a ship.
-                'sunk_ship_type': ShipType; the reported type of the hit ship, 
-                    if a ship was sunk. None if no ship was sunk.
-                'inferred_ship_type': ShipType; for future use.
-
-        Returns
-        -------
-        targets_with_probs : dict
-            A dictionary with keys equal to each possible target tuple (i.e.,
-            a (row,col) tuple) and value equal to the probability that the 
-            Hunter should choose that coordinate as its target.
-
-        """
-        #** For debug purposes only **
-        if board == None:
-            board = self.board
-        if outcome_history == None:
-            outcome_history = self.outcome_history
-        # *** ^^^^^^^^ ***
-        
-        if self.state is not Mode.KILL:
-            Warning("Received a call to kill_targets_from_shape while"
-                    " offense is not in KILL state.")
-            
-        initial_hit = self.initial_hit
-        last_hit = self.last_hit(outcome_history)
-        
-        # Check validity of initial_hit and last_hit (ie, that they != None)
-        if initial_hit == None:
-            raise ValueError("initial_hit is None, likely "
-                             "because state has not yet changed due to a hit.")
-        elif board.target_grid[initial_hit] != constants.TargetValue.HIT:
-            raise ValueError("initial_hit is not a hit, likely"
-                             " because state has not yet changed due to a "
-                             "hit.")
-        if last_hit == None:
-            raise ValueError("Last hit is None, likely because no hits have "
-                             "been scored yet.")
-        
-        # Find targets connected to initial hit
-        connected_hits_in_col, connected_hits_in_row = self.connected_hits(
-            board,initial_hit)
-        vector = last_hit[0] - initial_hit[0], last_hit[1] - initial_hit[1]
-
-        if connected_hits_in_col and connected_hits_in_row:
-            print(vector)
-            if vector == (0,0):
-                len_conn_hit_col = len(connected_hits_in_col)
-                len_conn_hit_row = len(connected_hits_in_row)
-                targets_col = self.targets_at_end_of_line(board, 
-                                                          connected_hits_in_col)
-                targets_row = self.targets_at_end_of_line(board, 
-                                                          connected_hits_in_row)
-                if len_conn_hit_col > len_conn_hit_row:
-                    targets_eol = targets_col if targets_col else targets_row
-                elif len_conn_hit_row > len_conn_hit_col:
-                    targets_eol = targets_col if targets_row else targets_col
-                else:
-                    targets_eol = targets_col + targets_row
-            
-            elif vector[0] != 0:
-                targets_eol = self.targets_at_end_of_line(board, 
-                    connected_hits_in_col, initial_hit)
-            elif vector[1] != 0:
-                targets_eol = self.targets_at_end_of_line(board, 
-                    connected_hits_in_row, initial_hit)
-            
-        elif connected_hits_in_col:
-            targets_eol = self.targets_at_end_of_line(board, 
-                                                      connected_hits_in_col,
-                                                      initial_hit)
-            
-        elif connected_hits_in_row:
-            targets_eol = self.targets_at_end_of_line(board, 
-                                                      connected_hits_in_row,
-                                                      initial_hit)
-            
-        else:
-            targets_eol = []
-            
-        # Choose end-of-line target based on which one is along the same
-        # direction as previous targets, and then which one is closer to
-        # initial hit.
-        if len(targets_eol) == 0:
-            targets = board.targets_around(initial_hit, untargeted=True)
-        elif len(targets_eol) == 1:
-            targets = targets_eol
-        elif len(targets_eol) >= 2:
-            vector = np.array(vector)
-            if vector.sum() == 0:
-                delta = 0
-            else:
-                delta = int(np.round(vector.sum() / np.abs(vector.sum())))
-            t0 = np.array(initial_hit)
-            # first, choose the target in the direction of vector.
-            if delta > 0:
-                targets = [targets_eol[-1]]
-            elif delta < 0:
-                targets = [targets_eol[0]]
-            # If vector is 0 (no hits beyond initial), choose the targets 
-            # closest to the initial hit.
-            else:
-                dist = np.sum(np.abs(np.array(targets_eol) 
-                              - np.tile(t0,(len(targets_eol),1))), axis=1)
-                targets = [targets_eol[dist.argmin()]]
-        
-        # targets should be a list at this point
-        
-        if not targets:
-            return {}
-        else:
-            return dict(zip(targets, [1/len(targets)] * len(targets)))
-        
-        
-    def targets_at_end_of_line(self, board, hit_coords, along_coord=None):
-        """
-        Returns valid targets at the end of the input line of hits.
-        
-        If the input hit_coords contains only a single hit, targets 
-        above/below and left/right of the hit are considered unless an 
-        additional coordinate is provided with the along_coord parameter. 
-        In this case, only the direction specified by the line between
-        hit_coords[0] and along_coord will be considered.
-
-        Parameters
-        ----------
-        board : Board
-            The board containing the target grid to consider.
-        hit_coords : list
-            A list of coordinates that are (1) all hits, (2) lie on the same
-            row or col, and (3) are contiguous with one another (i.e., no 
-            non-hit coords in between any of the hits).
-        along_coord : tuple, optional
-            A row/col tuple specifying the direction that targets are allowed
-            to lie along. along_coord should be in the same row or column
-            as the hit_coords; if not, a ValueError is raised.
-
-        Returns
-        -------
-        targets : list
-            A list of coords at the end of the line that are valid targets.
-            This list may be empty, or have one or two coord tuples.
-
-        """
-        rows, cols = zip(*hit_coords)
-        if not (all([r == rows[0] for r in rows]) or 
-                all([c == cols[0] for c in cols])):
-            raise ValueError("hits must all in one row or column.")
-        
-        if not np.all(board.target_grid[rows,cols] 
-                      == constants.TargetValue.HIT):
-            raise ValueError("Non-hit coordinates cannot be part of the line.")
-            
-        # Deal with the case where there is only 1 hit_coord
-        if len(rows) == 1:
-            if along_coord:
-                if along_coord == hit_coords[0]:
-                    raise ValueError("along_coord cannot be identical to a "
-                                     "lone hit_coord.")
-                targets = board.targets_around(hit_coords[0], untargeted=True)
-                if along_coord[0] == rows[0]:
-                    targets = [t for t in targets if t[0] == along_coord[0]]
-                elif along_coord[1] == cols[0]:
-                    targets = [t for t in targets if t[1] == along_coord[1]]
-                else:
-                    raise ValueError("along_coord must be in the same row "
-                                     "or same col as hit_coord.")
-            else:
-                return board.targets_around(hit_coords[0], untargeted=True)
-        
-        rows = np.array(sorted(rows)) # doesn't matter if we mix up index of coords
-        cols = np.array(sorted(cols))
-        if np.all(np.diff(rows) == 0):
-            targets = [(rows[0], cols[0] - 1), (rows[0], cols[-1] + 1)]
-        elif np.all(np.diff(cols) == 0):
-            targets = [(rows[0] - 1, cols[0]), (rows[-1] + 1, cols[0])]
-            
-        targets = [t for t in targets 
-                   if utils.is_on_board(t, board.size)
-                   and board.target_grid[t] == constants.TargetValue.UNKNOWN]
-        return targets        
-            
-            
-    def hits_since_initial_hit(self, outcome_history, initial_hit):
-        """
-        Returns a list of hit coordinates that have been targeted between
-        the initial hit and the current turn.
-
-        Parameters
-        ----------
-        outcome_history : list
-            Ordered list of outcomes, most recent outcome last.
-        initial_hit : row/col tuple
-            The row/col of the initial hit (usuall the one that set the Hunter 
-            to kill mode).
-
-        Returns
-        -------
-        hits : list
-            An ordered list of target coordinates where hits occurred. Most
-            recent hit last.
-
-        """
-        hits = []
-        for outcome in reversed(outcome_history):
-            if outcome["coord"] == initial_hit:
-                break
-            elif outcome["hit"]:
-                hits += [outcome["coord"]]
-        return list(reversed(hits))
-        
-        
-    def connected_hits(self, board, hit, row_col_output=True):
-        """
-        Returns lists of hits that are contiguous with the input hit. Two
-        hits are contiguous (or 'connected') if they are in the same row or
-        column and are either adjacent or separated only by hits (not by 
-        misses or unknown spaces).
-
-        The output is a tuple containing two lists. The first list contains
-        the connected hits in the same column as the input hit, and the 
-        second list contains connected hits in the same row. The hits are
-        ordered top to bottom and left to right.
-        
-        Parameters
-        ----------
-        board : Board
-            The board whose target grid is used to idenfify connected hits.
-        hit : tuple
-            A two-element row/col tuple.
-        row_col_output : bool, optional
-            If True, the output is a tuple containing two lists, as described
-            above. If False, the output is a single list containing all 
-            connected hit coordinates. The default is True.
-
-        Returns
-        -------
-        connected : tuple (or list)
-            connected[0] is a list of all connected hits in the same COLUMN
-            as the input hit.
-            connected[1] is a list of all connected hits in the same ROW
-            as the input hit.
-
-        """
-        #row = board.target_grid[hit[0], :] == constants.TargetValue.HIT
-        #col = board.target_grid[:, hit[1]] == constants.TargetValue.HIT
-
-        vertical_hits = [(r, hit[1]) for r in range(hit[0]) 
-                    if np.all(board.target_grid[range(r, hit[0]), hit[1]] 
-                              == constants.TargetValue.HIT)]
-        vertical_hits += [(r, hit[1]) for r in range(hit[0]+1, board.size) 
-                          if np.all(board.target_grid[range(hit[0]+1, r+1), 
-                                                      hit[1]] 
-                                    == constants.TargetValue.HIT)]
-        
-        horizontal_hits = [(hit[0], c) for c in range(hit[1]) 
-                           if np.all(board.target_grid[hit[0], 
-                                                       range(c, hit[1])] 
-                                     == constants.TargetValue.HIT)]
-        horizontal_hits += [(hit[0], c) for c in range(hit[1]+1, board.size) 
-                            if np.all(board.target_grid[hit[0], 
-                                                        range(hit[1]+1, c+1)]
-                                      == constants.TargetValue.HIT)]
-        
-        if row_col_output:
-            return (vertical_hits, horizontal_hits)
-        else:
-            return vertical_hits + horizontal_hits
-                     
-        
     def kill_targets_from_placements(self, 
                                      board=None, 
                                      outcome_history=None, 
@@ -1383,25 +992,21 @@ class HunterOffense(Offense):
             outcome_history = self.outcome_history
         # *** ^^^^^^^^ ***
         
-        if self.state != Mode.KILL:
-            Warning("Received a call to kill_targets_from_placements "
-                    " while offense is not in KILL state.")
-            
-        initial_hit = self.initial_hit
-        if initial_hit == None:
-            raise ValueError("initial_hit is None, likely "
-                             "because state has not yet changed due to a hit.")
-        elif board.target_grid[initial_hit] < constants.TargetValue.HIT:
-            raise ValueError("initial_hit is not a hit, likely"
-                             " because state has not yet changed due to a hit.")
+        
+        last_open_hit = self.last_open_hit()
+        if last_open_hit == None:
+            raise ValueError("last_open_hit is None; "
+                             "should not be in kill methods.")
+        elif board.target_grid[last_open_hit] < constants.TargetValue.HIT:
+            raise ValueError("last_open_hit is not a hit.")
             
         sunk_ships = [outcome['sunk_ship_type'] for outcome in outcome_history
                       if outcome['sunk_ship_type'] is not None]
         afloat_ships = [i for i in range(1,len(Ship.data)+1) 
                         if not i in sunk_ships]
         
-        # find placements that overlap the initial_hit
-        placements = board.placements_containing_coord(initial_hit, 
+        # find placements that overlap the last_hit
+        placements = board.placements_containing_coord(last_open_hit, 
                                                        ship_types=afloat_ships)
         # Eliminate placements that do not contain only unknowns 
         # and unresolved hits
@@ -1458,209 +1063,252 @@ class HunterOffense(Offense):
         coords = [coord for coord in coords 
                   if targets_with_probs[coord] == max_score]
         return dict(zip(coords, [1/len(coords)] * len(coords)))
+    
+
+    # Basic Method
+    
+    def kill_targets_from_shape(self, 
+                                board=None, 
+                                outcome_history=None):
         
+        #** For debug purposes only **
+        if board == None:
+            board = self.board
+        if outcome_history == None:
+            outcome_history = self.outcome_history
+        # *** ^^^^^^^^ ***
+        
+        open_hits = self.open_hits(board, outcome_history)
+        if not open_hits:
+            raise ValueError("last_open_hit is empty; "
+                             "should not be in kill methods.")
+            
+        # If there is only one open hit, find targets around it.
+        if len(open_hits) == 1:
+            targets = board.targets_around(open_hits[-1], untargeted=True)
+        
+        # Otherwise, look for the most recent open hit that has an adjacent
+        # open hit.
+        else:
+            for hit in reversed(open_hits):
+                hit = Coord(hit)
+                adjacent_hit = None
+                for other_hit in reversed(open_hits):
+                    if hit.next_to(other_hit):
+                        adjacent_hit = other_hit
+                        break
+                if adjacent_hit:
+                    break
+            
+            # If two adjacent open hits were found, find targets at the ends
+            # of the line defined by the hits.
+            if adjacent_hit:
+                targets = self.targets_along(adjacent_hit, 
+                                             tuple(hit),    # Coord does not play nice with target_grid (np.array) 
+                                             board, 
+                                             outcome_history)
+                # Keep the target closer to the more recent hit, if more
+                # than one was located
+                if len(targets) == 2:
+                    targets = [targets[-1]]
+                
+            # If two adjacent hits were NOT found, find an arbitrary target
+            # around any of the open hits (prefer the more recent ones).
+            else:
+                for hit in reversed(open_hits):
+                    targets = board.targets_around(hit, untargeted=True)
+                    if targets:
+                        break
+                
+        if targets:
+             targets_with_probs = dict(zip(targets, 
+                                           [1./len(targets)] * len(targets)))
+        else:
+            targets_with_probs = {}
+        return targets_with_probs
     
-    ### Kill State Helper Methods ###
-    
-    @staticmethod
-    def outcomes_where(outcome_history, **kwargs):
+    def targets_along(self, 
+                      first_hit, 
+                      second_hit, 
+                      board=None, 
+                      outcome_history=None):
         """
-        Returns a filtered list of outcomes from the outcome history that 
-        match the input key/value pairs. 
+        Returns a list of targets at the ends of the line defined by first_hit
+        and second_hit. In this case, a "line" is a series of adjacent hits
+        on unknown ship types. 
+        
+        The targets will be a list of 0, 1, or 2 coordinates that are at the
+        end of the line defined by the hits and have unknown target grid 
+        values (that is, they have not been targeted yet). If the first spaces
+        outside of the line are misses or known hits, they will not be 
+        included in the targets list. If the line has no possible targets at
+        its ends, and empty list will be returned.
+        
+        If the line has targets at both ends, the first one will be the one
+        closer to first_hit.
+        
 
         Parameters
         ----------
-        outcome_history : list
-            A list of outcome dictionaries (each of which has the key/value
-            pairs listed below, with the possible exception of 'msg').
-        **kwargs : key/value pair (e.g., hit=True)
-            One of more of the following keys, with values of the type noted:
-                coord : two-element tuple
-                hit : bool
-                sunk : bool
-                sunk_ship_type : int or ShipType (Enum)
-                msg : str
-
-        Returns
-        -------
-        list
-            A filtered list of outcomes.
-
-        """
-        return [outcome for outcome in outcome_history 
-                if all([outcome[k] == v for (k,v) in kwargs.items()])]
-    
-    def targets_on_line(self, 
-                        board, 
-                        init_hit, 
-                        direction, 
-                        both_directions=True):
-        """
-        Returns viable untargeted spaces at the end of a line of hits starting
-        at init_hit and extending along the vector in direction (optionally 
-        both along direction and opposite to direction)
-
-        A viable space is one that is untargeted (no hit or miss) and connected
-        to init_hit by unattributed hits only.
-        
-        Parameters
-        ----------
-        board : Board
-            The board with a populated target_grid that will be searched for
-            viable untargeted spaces along the row/column defined by init_hit
-            and direction.
-        init_coord : tuple
-            A (row,col) tuple.
-        direction : tuple
-            A two-element tuple indicating which direction to search along. 
-            Must be one of the following:
-                (1,0)  : search below init_hit (along the column containing 
-                         init_hit, at higher row numbers)
-                (-1,0) : search above init_hit (along the column containing
-                         init_hit, at lower row numbers)
-                (0,1)  : search to the right of init_hit (along the row 
-                         containing init_hit, at higher column numbers)
-                (0,-1) : search to the left of init_hit (along the row
-                         containing init_hit, at lower column numbers)
-        both_directions: bool
-            If True, up to two endpoints will be returned; the one closest
-            to init_hit along direction, and the one closest to init_hit along
-            -direction. The default is True
+        first_hit : tuple
+            Row/col tuple (or Coord) of the first hit in the line.
+        second_hit : tuple
+            Row/col tuple (or Coord) of the second hit in the line.
+        board : TYPE, optional
+            DESCRIPTION. The default is None.
+        outcome_history : TYPE, optional
+            DESCRIPTION. The default is None.
 
         Returns
         -------
         targets : list
-            A zero-, one-, or two-element list containing the coordinates at
-            the endpoints of the line of hits starting at init_hit and 
-            extending along the row/column defined by direction.
-            
-            If both_directions is True (default), up to two targets can be
-            returned. If it is False, up to one target will be returned. In
-            either case, an empty list may be returned if there are no valid
-            targets found.
+            A list with zero, one, or two coordinate tuples. Each tuple is 
+            an untargeted coordinate at the end of the line defined by the
+            two input hit coordinates.
 
         """
-        # normalize direction
-        direction = ((int(abs(direction[0]) > 1e-9) * np.sign(direction[0])),
-                     (int(abs(direction[1]) > 1e-9) * np.sign(direction[1])))
         
-        # find the first non-hit space starting at init_hit and moving along
-        # direction
-        next_coord = (init_hit[0] + direction[0], init_hit[1] + direction[1])
-        while (utils.is_on_board(next_coord, board.size) 
-               and board.target_grid[next_coord] == constants.TargetValue.HIT):
-            next_coord = (next_coord[0] + direction[0], 
-                          next_coord[1] + direction[1])
-        if not utils.is_on_board(next_coord, board.size):
-            targets = []
-        elif board.target_grid[next_coord] == constants.TargetValue.UNKNOWN:
-            targets = [next_coord]
+        #** For debug purposes only **
+        if board == None:
+            board = self.board
+        if outcome_history == None:
+            outcome_history = self.outcome_history
+        # *** ^^^^^^^^ ***
+    
+        vector = np.array((second_hit[0] - first_hit[0], 
+                           second_hit[1] - first_hit[1]))
+        
+        #assert board.target_grid[first_hit] == constants.TargetValue.HIT
+        assert board.target_grid[second_hit] == constants.TargetValue.HIT
+        assert vector[0] == 0 or vector[1] == 0
+        
+        if vector[0] == 0:
+            line = board.target_grid[second_hit[0],:]
+            # i1 = first_hit[1]
+            i2 = second_hit[1]
         else:
-            targets = []
+            line = board.target_grid[:, second_hit[1]]
+            # i1 = first_hit[0]
+            i2 = second_hit[0]
+        
+        targets = []
+        for idx in range(i2 + 1, board.size):
+            if line[idx] != constants.TargetValue.HIT:
+                if line[idx] == constants.TargetValue.UNKNOWN:
+                    targets += [idx]
+                break
             
-        if both_directions:
-            targets += self.targets_on_line(board, 
-                                            init_hit, 
-                                            (-direction[0],-direction[1]), 
-                                            both_directions=False)
+        for idx in range(i2 - 1, -1, -1):
+            if line[idx] != constants.TargetValue.HIT:
+                if line[idx] == constants.TargetValue.UNKNOWN:
+                    targets = [idx] + targets
+                break
+        
+        if vector[0] == 0:
+            targets = [(second_hit[0], t) for t in targets]
+        else:
+            targets = [(t, second_hit[1]) for t in targets]
+            
+        if sum(vector) < 0 and len(targets) == 2:
+            targets = [targets[1], targets[0]]
+            
         return targets
-    
-    
-    ### State Update Methods ###
-    
-    def update_state(self, outcome):
-        """
-        Changes the state from hunt to kill or kill to hunt based on the 
-        current state and the outcome of the last shot. This logic is as 
-        follows:
-            
-            In HUNT mode, check for unresolved hits.
-            In KILL mode, if there are no targets go back to HUNT mode (
-                this will cause a search for unresolved hits).
-            
-            In HUNT mode:
-                If outcome was a HIT:
-                    If outcome was a SINK --> stay in HUNT mode
-                    Otherwise --> go to KILL mode
-                If outcome was a MISS --> stay in HUNT mode
-            
-            In KILL mode:
-                If outcome was a HIT:
-                    If outcome was a SINK --> go to HUNT mode
-                    Otherwise --> stay in KILL mode
-                If outcome was a MISS --> stay in KILL mode
-
-        Parameters
-        ----------
-        outcome : dict
-            An outcome dictionary that contains the following key/value pairs:
-                'coord': tuple (row, col); the targeted coordinate.
-                'hit': bool; True if shot hit a ship.
-                'sunk': bool; True if shot resulted in sinking a ship.
-                'sunk_ship_type': ShipType; the reported type of the hit ship, 
-                    if a ship was sunk.
-                'inferred_ship_type': ShipType; for future use.                
-
-        Returns
-        -------
-        None.
-
-        """
-        if self.state is Mode.HUNT:
-            if outcome['hit'] and not outcome['sunk']:
-                self.set_to_kill(outcome)
-        else:
-            if outcome['hit'] and outcome['sunk']:
-                self.set_to_hunt(outcome)
-                
-    
-    def set_to_hunt(self, outcome=None):
-        """
-        Sets the Hunter to hunt mode. Throws a warning if already in hunt mode.
-
-        Parameters
-        ----------
-        outcome : dict
-            An outcome dict that contains, at minimum, a value for key 'coord'.
         
+    ### Other Methods (Computated Properties) ###
+    
+    def open_hits(self, board=None, outcome_history=None):
+        """
+        Returns the list of hits on the board's target grid that have not
+        been assigned to a particular ship type. The list is ordered such
+        that the most recent hit is last.
+
         Returns
         -------
-        None.
+        hits : list
+            A list of target coordinates (tuples) for hits that cannot be
+            assigned to a particular type of ship.
 
         """
-        if self.state is Mode.HUNT:
-            print("Attempting to set state to Hunt while in Hunt mode. "
-                  "No change.")
-            if outcome:
-                print(f"  Target = {outcome['coord']})")
-        else:
-            self.state = Mode.HUNT
-        self.initial_hit = None
-            
-        
-    def set_to_kill(self, outcome):
+        #** For debug purposes only **
+        if board == None:
+            board = self.board
+        if outcome_history == None:
+            outcome_history = self.outcome_history
+        # *** ^^^^^^^^ ***
+        open_hits = [outcome['coord'] for outcome in reversed(outcome_history)
+                     if (board.target_grid[outcome['coord']] 
+                         == constants.TargetValue.HIT)]
+        return open_hits
+    
+    
+    def last_open_hit(self, board=None, outcome_history=None):
         """
-        Sets the Hunter to hunt mode. Throws a warning if already in hunt mode.
+        Returns a tuple with the coordinates of the most recent open hit--the
+        hit that cannot be assigned to a particular ship type.
+        
+        If there are no open hits on the board, None is returned.
 
         Parameters
         ----------
-        outcome : dict
-            An outcome dict that contains, at minimum, a value for key 'coord'.
-            
+        board : Board, optional
+            The board on which targets are recorded. The default is None,
+            in which case the Hunter's board property is used (if it exists).
+        outcome_history : list, optional
+            The history list in which outcomes are recorded. The default is 
+            None, in which case the Hunter's outcome_history property is used 
+            (if it exists).
+
         Returns
         -------
-        None.
+        hit : tuple (row,col)
+            The (row,col) of the most recent open hit, or None if no such
+            hit exists.
 
         """
-        if self.state is Mode.KILL:
-            print(f"Attempting to set state to Kill while in Kill mode. "
-                  f"No change (target = {outcome['coord']})")
+        #** For debug purposes only **
+        if board == None:
+            board = self.board
+        if outcome_history == None:
+            outcome_history = self.outcome_history
+        # *** ^^^^^^^^ ***
+        
+        last_open_hit = None
+        for outcome in reversed(outcome_history):
+            if (outcome['hit'] 
+                and (board.target_grid[outcome['coord']] 
+                     == constants.TargetValue.HIT)): 
+                last_open_hit = outcome['coord']
+                break
+        return last_open_hit
+    
+    
+    def last_target(self, outcome_history=None):
+        """
+        Returns the coordinate of the last targeted spot on the board.
+
+        Parameters
+        ----------
+        outcome_history : list, optional
+            The history list in which outcomes are recorded. The default is 
+            None, in which case the Hunter's outcome_history property is used 
+            (if it exists).
+
+        Returns
+        -------
+        target : tuple (row,col)
+            The (row,col) of the most recent targeted coordinate.
+
+        """
+        #** For debug purposes only **
+        if outcome_history == None:
+            outcome_history = self.outcome_history
+        # *** ^^^^^^^^ ***
+        if outcome_history:
+            target = outcome_history[-1]['coord']
         else:
-            self.state = Mode.KILL
-            self.initial_hit = outcome['coord']
-            
-            
-    ### Other Methods ###
+            target = None
+        return target
+    
     
     def last_hit(self, outcome_history=None):
         """

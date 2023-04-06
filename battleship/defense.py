@@ -338,6 +338,8 @@ class RandomDefense(Defense):
     def edge_buffer(self, value):
         if not isinstance(value, (int, np.integer)):
             raise TypeError("Buffer must be a non-negative integer.")
+        if value < 0:
+            raise ValueError("Buffer must be >= 0.")
         self._edge_buffer = value
         
     @property
@@ -348,6 +350,8 @@ class RandomDefense(Defense):
     def ship_buffer(self, value):
         if not isinstance(value, (int, np.integer)):
             raise TypeError("Buffer must be a non-negative integer.")
+        if value < 0:
+            raise ValueError("Buffer must be >= 0.")
         self._ship_buffer = value
         
     @property
