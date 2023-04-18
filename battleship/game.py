@@ -13,6 +13,7 @@ Class definition for Game object
 
 ### Imports ###
 
+from copy import deepcopy
 import numpy as np
 import time
 # from matplotlib import pyplot as plt
@@ -91,6 +92,7 @@ class Game:
         self.verbose = verbose
         self.show = show
         self._game_result = None
+        self._results_log = []
         
         if not self.player1.name:
             self.player1.name = "Player 1"
@@ -173,6 +175,10 @@ class Game:
     @property
     def game_result(self):
         return self._game_result
+    
+    @property
+    def results_log(self):
+        return self._results_log
     
     # Other methods 
     
@@ -345,6 +351,8 @@ class Game:
                     'first_move': first_move,
                     'player1': first_player,
                     'player2': second_player,
+                    'player1_history': [],
+                    'player2_history': [],
                     'turn_count': 0,
                     'max_turns': max_turns,
                     'game_id': self.game_id,
@@ -382,6 +390,10 @@ class Game:
                              'first_move': first_move,
                              'player1': self.player1,
                              'player2': self.player2,
+                             'player1_history': 
+                                 deepcopy(self.player1.outcome_history),
+                             'player2_history': 
+                                 deepcopy(self.player2.outcome_history),
                              'turn_count': self.turn_count,
                              'max_turns': max_turns,
                              'game_id': self.game_id,
