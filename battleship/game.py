@@ -14,9 +14,9 @@ Class definition for Game object
 ### Imports ###
 
 import numpy as np
-from time import perf_counter
-from matplotlib import pyplot as plt
-from collections import Counter
+import time
+# from matplotlib import pyplot as plt
+# from collections import Counter
 
 # Import from this package
 from battleship.coord import Coord
@@ -224,7 +224,9 @@ class Game:
      
     # Gameplay methods 
     
-    def play_one_turn(self, first_player, second_player):
+    def play_one_turn(self, first_player, second_player,
+                      first_player_target=None,
+                      second_player_target=None):
         """
         
 
@@ -249,12 +251,13 @@ class Game:
             raise Warning("First player's ships are all sunk.")
         if not second_player.is_alive():
             raise Warning("Second player's ships are all sunk.")
-        first_player.take_turn()
+        first_player.take_turn(first_player_target)
         if self.verbose:
             self.report_turn_outcome(first_player, True)
-        second_player.take_turn()
-        if self.verbose:
-            self.report_turn_outcome(second_player)
+        if second_player.is_alive():
+            second_player.take_turn(second_player_target)
+            if self.verbose:
+                self.report_turn_outcome(second_player)
         self.turn_count += 1
         if self.show:
             first_player.board.show()
@@ -312,7 +315,8 @@ class Game:
             'second_player_stats'   Game stats for second player.      
         
         """
-        start_time = perf_counter()
+        start_time = time.perf_counter()
+        timestamp = time.time()
         
         if max_turns == None:
             max_turns = 1e6
@@ -344,8 +348,11 @@ class Game:
                     'turn_count': 0,
                     'max_turns': max_turns,
                     'game_id': self.game_id,
+                    'duration': time.perf_counter() - start_time,
+                    'timestamp': timestamp,
                     'player1_stats': {},
-                    'player2_stats': {}}
+                    'player2_stats': {}
+                    }
         
         # Play until one player has lost all ships
         game_on = True
@@ -378,9 +385,12 @@ class Game:
                              'turn_count': self.turn_count,
                              'max_turns': max_turns,
                              'game_id': self.game_id,
-                             'duration': perf_counter() - start_time,
+                             'duration': time.perf_counter() - start_time,
+                             'timestamp': timestamp,
                              'player1_stats': self.player1.stats(),
-                             'player2_stats': self.player2.stats()}
+                             'player2_stats': self.player2.stats()
+                             }
+        self._results_log += [self.game_result]
         
         # add result to players' game histories
         self.player1.add_result_to_history(self._game_result)
@@ -493,14 +503,18 @@ class Game:
             print(f"(Game ID: {self.game_id})")
             print("")
         else:
+            player1_ships_sank = sum([1 - afloat for afloat in 
+                                      self.player2.board.is_fleet_afloat()])
+            player2_ships_sank = sum([1 - afloat for afloat in 
+                                      self.player1.board.is_fleet_afloat()])
             print("")
             print("GAME TERMINATED - NO WINNER.")
             print(f"    {self.player1.name} took " 
                   f"{len(self.player1.shot_history)} shots, and sank "
-                  f"{sum(1 - self.player2.board.is_fleet_afloat())} ships.")
+                  f"{player1_ships_sank} ships.")
             print(f"    {self.player2.name} took " 
                   f"{len(self.player2.shot_history)} shots, and sank "
-                  f"{sum(1 - self.player1.board.is_fleet_afloat())} ships.")
+                  f"{player2_ships_sank} ships.")
             print(f"Game length: {self.turn_count} turns.")
             print(f"(Game ID: {self.game_id})")
             print("")
