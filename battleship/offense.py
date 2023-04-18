@@ -354,7 +354,7 @@ class HunterOffense(Offense):
         moving from column to column along a single row, then on to the next 
         row.
         
-
+        
         Parameters
         ----------
         hunt_style : str
@@ -367,6 +367,7 @@ class HunterOffense(Offense):
                             pattern is specified in hunt_pattern, and the 
                             details of how spaces are selected are set using
                             pattern_options.
+                            
         hunt_pattern : str, optional
             Describes the shape of the target pattern. The hunt_pattern must
             be specified for all hunt_styles except for 'random'. Allowable
@@ -458,11 +459,10 @@ class HunterOffense(Offense):
                                 'advanced' takes possible placements of every
                                 remaining ship into account to generate a 
                                 probability around the most recent hit.
-
+                                
         Returns
         -------
         None.
-
         """
         
         super().__init__()
@@ -491,6 +491,8 @@ class HunterOffense(Offense):
         self._kill_options = HunterOffense.parse_kill_options(kill_options)
         
         #self._state = Offense.Mode.HUNT
+        
+        self._hunt_data = None     # used in pattern hunt methods
         self._initial_hit = None  
         self._target_probs = None
         
@@ -515,12 +517,12 @@ class HunterOffense(Offense):
         """
         Resets the hunter's state, initial_hit, and outcome_history (if 
         applicable) properties.
-
+    
         Returns
         -------
         None.
-
         """
+        
         super().reset()
         temp_offense = HunterOffense(self._hunt_style)
         #self._state = temp_offense.state
@@ -529,30 +531,6 @@ class HunterOffense(Offense):
         
         
     ### Properties ###
-    
-    # @property
-    # def state(self):
-    #     return self._state
-    
-    # @state.setter
-    # def state(self, value):
-    #     if value is Mode.HUNT or value is Mode.KILL:
-    #         self._state = value
-    #     else:
-    #         raise ValueError("state must be a valid Mode value.")
-            
-    # @property
-    # def initial_hit(self):
-    #     return self._initial_hit
-    
-    # @initial_hit.setter
-    # def initial_hit(self, value):
-    #     if value == None:
-    #         self._initial_hit = None
-    #     elif isinstance(value, (tuple, Coord)):
-    #         self._initial_hit = value
-    #     else:
-    #         raise TypeError("initial_hit coord needs to be a tuple or Coord.")
             
     @property
     def hunt_options(self):
@@ -592,6 +570,10 @@ class HunterOffense(Offense):
     def target_probs(self):
         return self._target_probs
     
+    @property
+    def hunt_data(self):
+        return self._hunt_data
+    
     
     ### Abstract Method Definitions ###
     
@@ -599,7 +581,7 @@ class HunterOffense(Offense):
         """
         Returns a target coordinate based on the input board and the shot/
         outcome history in outcome_history.
-
+        
         Parameters
         ----------
         board : Board
@@ -618,14 +600,13 @@ class HunterOffense(Offense):
                     if a ship was sunk.
                 'inferred_ship_type': ShipType; for future use.
             
-
         Returns
         -------
         target : tuple
             A two-element (row,col) tuple which can be used as the target for
             a player's next shot.
-
         """
+        
         #** For debug purposes only **
         if board == None:
             board = self.board
@@ -647,6 +628,7 @@ class HunterOffense(Offense):
             targets = board.all_targets(untargeted=True)
             probs = np.ones(len(targets)) / len(targets)
             Warning("No targets were identified; choosing one randomly.")
+            
         target = utils.random_choice(targets, probs)
         return target
     
@@ -656,17 +638,17 @@ class HunterOffense(Offense):
         Updates the HunterOffense state; since this offense chooses targets
         based on history, no state variables are required; 
         this method does nothing.
-
+        
         Parameters
         ----------
         outcome : dict
             Outcome dictionary.
-
+            
         Returns
         -------
         None.
-
         """
+        
         pass
     
     
@@ -676,7 +658,7 @@ class HunterOffense(Offense):
         """
         Returns possible target coordinates and associated probabilities for 
         choosing each target coordinate.
-
+        
         Parameters
         ----------
         board : Board
@@ -693,14 +675,13 @@ class HunterOffense(Offense):
                 'sunk_ship_type': ShipType; the reported type of the hit ship, 
                     if a ship was sunk. None if no ship was sunk.
                 'inferred_ship_type': ShipType; for future use.
-
+                
         Returns
         -------
         targets_with_probs : dict
             A dictionary with keys equal to each possible target tuple (i.e.,
             a (row,col) tuple) and value equal to the probability that the 
             Hunter should choose that coordinate as its target.
-
         """
         
         #** For debug purposes only **
@@ -711,9 +692,11 @@ class HunterOffense(Offense):
             
         # Get target probabilities based on pattern:
         if self._hunt_style == "random":
-            targets_with_probs = self.random_hunt_targets(board, outcome_history)
+            targets_with_probs = self.random_hunt_targets(board, 
+                                                          outcome_history)
         elif self._hunt_style == "pattern":
-            targets_with_probs = self.pattern_hunt_targets(board, outcome_history)
+            targets_with_probs = self.pattern_hunt_targets(board, 
+                                                           outcome_history)
         else:
             raise ValueError(f"{self._hunt_style} is not a valid value for "
                              "the hunt_style parameter.")
@@ -726,8 +709,10 @@ class HunterOffense(Offense):
     def pattern_hunt_targets(self, board=None, outcome_history=None):
         """
         Returns target coordinates for the next coordinate along the hunt
-        pattern in hunt mode.
-
+        pattern in hunt mode. The next target is based on the last shot
+        fired at a space that is not an open hit, the pattern mode, and
+        the current pattern hunt state.
+        
         Parameters
         ----------
         board : Board
@@ -744,19 +729,371 @@ class HunterOffense(Offense):
                 'sunk_ship_type': ShipType; the reported type of the hit ship, 
                     if a ship was sunk. None if no ship was sunk.
                 'inferred_ship_type': ShipType; for future use.
+                
+        Returns
+        -------
+        next_target : tuple
+            A two-element row/col tuple that indicates the next target in the
+            hunt pattern.
+        """
+        
+        if self.hunt_pattern in ('grid', 'spiral', 'diagonal'):
+            target = self.next_target_in_pattern(board,
+                                                 outcome_history)
+        else:
+            raise AttributeError(f"Invalid hunt pattern encountered: "
+                                 f"{self.hunt_pattern}")
+        return target
+    
+    
+    def next_target_in_pattern(self, board, outcome_history):
+        """
+        Returns the next target in a pattern.
+
+        Parameters
+        ----------
+        pattern : str
+            'grid', 'diagonal', or 'spiral'.
+        board : Board
+            The board on which targets are selected. Only the size property is
+            really relevant.
+        outcome_history : list
+            List out outcome dictionaries. Most recent is last.
 
         Returns
         -------
-        targets_with_probs : dict
-            A dictionary with keys equal to each possible target tuple (i.e.,
-            a (row,col) tuple) and value equal to the probability that the 
-            Hunter should choose that coordinate as its target.
+        None.
 
-            Since the target is chosen from a list of coordinates that form
-            the hunt pattern, the targets_with_probs dict contains a single 
-            coordinate with probability 1.
         """
-        raise NotImplementedError("This method is not yet implemented.")
+        
+        #** For debug purposes only **
+        if board == None:
+            board = self.board
+        if outcome_history == None:
+            outcome_history = self.outcome_history
+        # *** ^^^^^^^^ ***
+        
+        if not self.hunt_data:
+            self._hunt_data = self.pattern_for_options(self.pattern, 
+                                                       board, 
+                                                       self.hunt_options)
+            
+        shots = [outcome['coord'] for outcome in outcome_history]
+        next_target = None
+        for target in self.hunt_data:
+            if target not in shots:
+                next_target = target
+                break
+        
+        return next_target
+        
+    
+    def pattern_for_options(self, pattern_type, board, options):
+        """
+        Returns the list of target coords that make up a pattern of the 
+        specified type on the input board with properties specified in
+        options.
+
+        Parameters
+        ----------
+        pattern_type : str
+            String indicating the type of pattern: 'grid', 'diagonal', or
+            'sprial'.
+        board : Board
+            The board on which the targets are determined.
+        options : dict
+            Dictionary with some of the following keys, depending on 
+            pattern type:
+                'edge_buffer': (int) Do not target spaces within this many 
+                                spaces of the edge of the board. Default is 0.
+                'rotate' : (int) 0, +/-90, +/-180, 270, 360
+                                'pattern' hunt_stlye only.
+                                The degrees to rotate a pattern relative to 
+                                a starting position of coordinate A1.
+                'mirror' : (str) 'horizontal' or 'vertical'
+                                'pattern' hunt_style only.
+                                If 'horizontal', the pattern will be flipped
+                                across a horizontal (row).
+                                If 'vertical', it will be flipped across a 
+                                vertical (column).
+                'spacing' : (int) 'pattern' hunt_style only.
+                                The separation between subsequent targets
+                                in a pattern. 
+                'secondary_spacing' : (int) 'pattern' hunt_style only.
+                                Some hunt_pattern types accept a spacing
+                                along a second direction.
+                                For 'diagonal', This is the horizontal 
+                                separation between each diagonal line.
+                                For 'grid', it is the horizontal separation 
+                                between each vertical line.
+                                For 'spiral', it has no effect.
+                'no_valid_targets' : (str) 'random' or 'ordered'
+                                Sets the Offense's behavior once the pattern
+                                list has no more target coordinates.
+                                If 'random', a target will be selected randomly
+                                from the untargeted spaces (still weighted
+                                according to hunt_pattern, if applicable). 
+                                If 'ordered', the target will be selected in 
+                                ascending order from the untargeted spaces,
+                                moving from column to column along a single 
+                                row, then on to the next row.
+
+        Returns
+        -------
+        pattern : list
+            An ordered list of coordinate tuples.
+
+        """
+        if pattern_type == 'grid':
+            pattern = self.pattern_grid(board, options)
+        elif pattern_type == 'sprial':
+            pattern = self.pattern_spiral(board, options)
+        elif pattern_type == 'diagonal':
+            pattern = self.pattern_diagonal(board, options)
+        else:
+            raise ValueError(f"Invalid pattern type: {pattern_type}")
+        return pattern
+    
+            
+    def pattern_grid(self, board, options):
+        """
+        Returns a grid pattern based on the input board and options dict.
+
+        Parameters
+        ----------
+        board : Board
+            The board on which the targets are determined..
+        options : dict
+            Dictionary with some of the following keys:
+                'edge_buffer': (int) Do not target spaces within this many 
+                                spaces of the edge of the board. Default is 0.
+                'rotate' : (int) 0, +/-90, +/-180, 270, 360
+                                'pattern' hunt_stlye only.
+                                The degrees to rotate a pattern relative to 
+                                a starting position of coordinate A1.
+                'mirror' : (str) 'horizontal' or 'vertical'
+                                'pattern' hunt_style only.
+                                If 'horizontal', the pattern will be flipped
+                                across a horizontal (row).
+                                If 'vertical', it will be flipped across a 
+                                vertical (column).
+                'spacing' : (int) 'pattern' hunt_style only.
+                                The separation between subsequent targets
+                                in a pattern. 
+                'secondary_spacing' : (int) 'pattern' hunt_style only.
+                                Some hunt_pattern types accept a spacing
+                                along a second direction.
+                                For 'diagonal', This is the horizontal 
+                                separation between each diagonal line.
+                                For 'grid', it is the horizontal separation 
+                                between each vertical line.
+                                For 'spiral', it has no effect.
+                'no_valid_targets' : (str) 'random' or 'ordered'
+                                Sets the Offense's behavior once the pattern
+                                list has no more target coordinates.
+                                If 'random', a target will be selected randomly
+                                from the untargeted spaces (still weighted
+                                according to hunt_pattern, if applicable). 
+                                If 'ordered', the target will be selected in 
+                                ascending order from the untargeted spaces,
+                                moving from column to column along a single 
+                                row, then on to the next row..
+
+        Returns
+        -------
+        pattern : list
+            An ordered list of coordinate tuples.
+
+        """
+        edge_buffer = options['edge_buffer']
+        spacing = options['spacing']
+        if spacing < 1:
+            raise ValueError('hunt_options spacing value cannot be 0.')
+        secondary_spacing = options['secondary_spacing']
+        if secondary_spacing < 1:
+            secondary_spacing = spacing
+            Warning("hunt_options secondary_spacing value is 0. "
+                    "Updating to equal spacing.")
+        coord = Coord((edge_buffer, edge_buffer))
+        coords = [coord]
+        direction = 'E'
+        step = {'N': Coord((-1,0)), 
+                'S': Coord((1,0)), 
+                'E': Coord((0,1)), 
+                'W': Coord((0,-1))}
+        
+        count = 0
+        while count < board.size * board.size:
+            count += 1
+            next_coord = coords[-1] + step[direction] * spacing
+            # check if we need to go to the next row
+            if next_coord[1] >= board.size - edge_buffer:
+                next_coord = Coord((coords[-1][0] + secondary_spacing, 
+                                    edge_buffer))
+            # check if coord has passed the last row    
+            if next_coord[0] >= board.size - edge_buffer:
+                break
+            else:
+                pass
+            
+            coords += [next_coord]
+            
+        if count >= board.size * board.size:
+            Warning("Number of grid coords exceeds number of board spaces.")
+            
+        # Rotate
+        if options['rotate']:
+            coords = utils.rotate_coords(coords, options['rotate'], board.size)
+        # Mirror
+        if (isinstance(options['mirror'], str) 
+                and options['mirror'].lower() == 'horizontal'):
+            coords = utils.mirror_coords(coords, 1, board.size)
+        elif (isinstance(options['mirror'], str) 
+              and options['mirror'].lower() == 'vertical'):
+            coords = utils.mirror_coords(coords, 0, board.size)
+                
+        return coords
+    
+    def pattern_spiral(self, board, options):
+        """
+        Returns a spiral pattern based on the input board and options dict.
+
+        Parameters
+        ----------
+        board : Board
+            The board on which the targets are determined..
+        options : dict
+            Dictionary with some of the following keys:
+                'edge_buffer': (int) Do not target spaces within this many 
+                                spaces of the edge of the board. Default is 0.
+                'rotate' : (int) 0, +/-90, +/-180, 270, 360
+                                'pattern' hunt_stlye only.
+                                The degrees to rotate a pattern relative to 
+                                a starting position of coordinate A1.
+                'mirror' : (str) 'horizontal' or 'vertical'
+                                'pattern' hunt_style only.
+                                If 'horizontal', the pattern will be flipped
+                                across a horizontal (row).
+                                If 'vertical', it will be flipped across a 
+                                vertical (column).
+                'spacing' : (int) 'pattern' hunt_style only.
+                                The separation between subsequent targets
+                                in a pattern. 
+                'no_valid_targets' : (str) 'random' or 'ordered'
+                                Sets the Offense's behavior once the pattern
+                                list has no more target coordinates.
+                                If 'random', a target will be selected randomly
+                                from the untargeted spaces (still weighted
+                                according to hunt_pattern, if applicable). 
+                                If 'ordered', the target will be selected in 
+                                ascending order from the untargeted spaces,
+                                moving from column to column along a single 
+                                row, then on to the next row..
+
+        Returns
+        -------
+        pattern : list
+            An ordered list of coordinate tuples.
+
+        """
+        edge_buffer = options['edge_buffer']
+        spacing = options['spacing']
+        
+        directions = ['N', 'E', 'S', 'W']
+        step = {'N': Coord((-1,0)), 
+                'S': Coord((1,0)), 
+                'E': Coord((0,1)), 
+                'W': Coord((0,-1))}
+        
+        coord = Coord((edge_buffer, edge_buffer))
+        coords = [coord]
+        direction = 'E'
+        min_row, max_row = edge_buffer, board.size - edge_buffer - 1
+        min_col, max_col = edge_buffer, board.size - edge_buffer - 1
+        count = 0
+        
+        while count < board.size * board.size:
+            count += 1
+            next_coord = coords[-1] + step[direction] * spacing
+            if (next_coord[0] < min_row or next_coord[0] > max_row
+                    or next_coord[1] < min_col or next_coord[1] > max_col):
+                direction = directions[(directions.index(direction)+1) 
+                                       % len(directions)]
+                if direction == 'N':
+                    max_row = coords[-1][0] - 1
+                elif direction == 'S':
+                    min_row = coords[-1][0] + 1
+                elif direction == 'E':
+                    min_col = coords[-1][1] + 1
+                else:
+                    max_col = coords[-1][1] - 1
+                
+                if min_row > max_row or min_col > max_col:
+                    break
+                
+            else:
+                # Accept next coord
+                coord = next_coord
+                coords += [coord]
+                    
+        if count > board.size:
+            Warning("Spiral has more steps than board spaces.")
+        
+        return coords
+    
+    
+    def pattern_diagonal(self, board, options):
+        """
+        Returns a diagonal pattern based on the input board and options dict.
+
+        Parameters
+        ----------
+        board : Board
+            The board on which the targets are determined..
+        options : dict
+            Dictionary with some of the following keys:
+                'edge_buffer': (int) Do not target spaces within this many 
+                                spaces of the edge of the board. Default is 0.
+                'rotate' : (int) 0, +/-90, +/-180, 270, 360
+                                'pattern' hunt_stlye only.
+                                The degrees to rotate a pattern relative to 
+                                a starting position of coordinate A1.
+                'mirror' : (str) 'horizontal' or 'vertical'
+                                'pattern' hunt_style only.
+                                If 'horizontal', the pattern will be flipped
+                                across a horizontal (row).
+                                If 'vertical', it will be flipped across a 
+                                vertical (column).
+                'spacing' : (int) 'pattern' hunt_style only.
+                                The separation between subsequent targets
+                                in a pattern. 
+                'secondary_spacing' : (int) 'pattern' hunt_style only.
+                                Some hunt_pattern types accept a spacing
+                                along a second direction.
+                                For 'diagonal', This is the horizontal 
+                                separation between each diagonal line.
+                                For 'grid', it is the horizontal separation 
+                                between each vertical line.
+                                For 'spiral', it has no effect.
+                'no_valid_targets' : (str) 'random' or 'ordered'
+                                Sets the Offense's behavior once the pattern
+                                list has no more target coordinates.
+                                If 'random', a target will be selected randomly
+                                from the untargeted spaces (still weighted
+                                according to hunt_pattern, if applicable). 
+                                If 'ordered', the target will be selected in 
+                                ascending order from the untargeted spaces,
+                                moving from column to column along a single 
+                                row, then on to the next row..
+
+        Returns
+        -------
+        pattern : list
+            An ordered list of coordinate tuples.
+
+        """
+       
+        raise NotImplementedError("Diagonal pattern not yet implemented.")    
         
         
     # Random Hunt Methods
@@ -766,7 +1103,7 @@ class HunterOffense(Offense):
         Returns possible target coordinates and associated probabilities for 
         choosing each target coordinate for a randomly chosen target in 
         hunt mode.
-
+        
         Parameters
         ----------
         board : Board
@@ -783,15 +1120,15 @@ class HunterOffense(Offense):
                 'sunk_ship_type': ShipType; the reported type of the hit ship, 
                     if a ship was sunk. None if no ship was sunk.
                 'inferred_ship_type': ShipType; for future use.
-
+                
         Returns
         -------
         targets_with_probs : dict
             A dictionary with keys equal to each possible target tuple (i.e.,
             a (row,col) tuple) and value equal to the probability that the 
             Hunter should choose that coordinate as its target.
-
         """
+        
         #** For debug purposes only **
         if board == None:
             board = self.board
@@ -853,7 +1190,24 @@ class HunterOffense(Offense):
     ### Kill Methods ###
     
     def kill_targets(self, board=None, outcome_history=None):
-        
+        """
+        Returns the list of possible targets based on the location of hits
+        on the board.
+
+        Parameters
+        ----------
+        board : Board
+            The board on which targets are identified.
+        outcome_history : TYPE, optional
+            The list of outcome dictionaries used to determine where to shoot.
+
+        Returns
+        -------
+        targets_with_probs : dict
+            A dictionary with keys equal to possible target tuples, and values
+            equal to the probability of choosing the corresponding target key.
+
+        """
         #** For debug purposes only **
         if board == None:
             board = self.board
@@ -876,7 +1230,6 @@ class HunterOffense(Offense):
         # If no kill targets are found, revert to HUNT mode and get a hunt
         # target.
         if not targets_with_probs:
-            self.set_to_hunt(None)
             targets_with_probs = self.hunt_targets(board, outcome_history)
             
         return self.normalized_probs(targets_with_probs)
@@ -888,7 +1241,7 @@ class HunterOffense(Offense):
         """
         Returns a target around the last successful hit that has untargeted
         spaces around it.
-
+        
         Parameters
         ----------
         board : Board
@@ -905,14 +1258,13 @@ class HunterOffense(Offense):
                 'sunk_ship_type': ShipType; the reported type of the hit ship, 
                     if a ship was sunk. None if no ship was sunk.
                 'inferred_ship_type': ShipType; for future use.
-
+                
         Returns
         -------
         targets_with_probs : dict
             A dictionary with keys equal to each possible target tuple (i.e.,
             a (row,col) tuple) and value equal to the probability that the 
             Hunter should choose that coordinate as its target.
-
         """
         
         #** For debug purposes only **
@@ -949,7 +1301,7 @@ class HunterOffense(Offense):
         """
         Determines kill target based on possible placements around the hit
         that set the Hunter into kill mode. 
-
+        
         Parameters
         ----------
         board : Board
@@ -976,15 +1328,15 @@ class HunterOffense(Offense):
             If True, only the coordinates that are adjacent to the most recent
             hit will be returned. If False, any coordinates within a ship's 
             length with be returned (remaining ships only).
-
+            
         Returns
         -------
         targets_with_probs : dict
             A dictionary with keys equal to each possible target tuple (i.e.,
             a (row,col) tuple) and value equal to the probability that the 
             Hunter should choose that coordinate as its target.
-
         """
+        
         #** For debug purposes only **
         if board == None:
             board = self.board
@@ -993,7 +1345,7 @@ class HunterOffense(Offense):
         # *** ^^^^^^^^ ***
         
         
-        last_open_hit = self.last_open_hit()
+        last_open_hit = self.last_open_hit(board, outcome_history)
         if last_open_hit == None:
             raise ValueError("last_open_hit is None; "
                              "should not be in kill methods.")
@@ -1005,22 +1357,47 @@ class HunterOffense(Offense):
         afloat_ships = [i for i in range(1,len(Ship.data)+1) 
                         if not i in sunk_ships]
         
-        # find placements that overlap the last_hit
-        placements = board.placements_containing_coord(last_open_hit, 
-                                                       ship_types=afloat_ships)
-        # Eliminate placements that do not contain only unknowns 
-        # and unresolved hits
-        placements = [p for p in placements 
-                      if board.is_valid_target_ship_placement(p)]
+        # # find placements that overlap the last_hit
+        # placements = board.placements_containing_coord(last_open_hit, 
+        #                                                ship_types=afloat_ships)
+        # # Eliminate placements that do not contain only unknowns 
+        # # and unresolved hits
+        # placements = [p for p in placements 
+        #               if board.is_valid_target_ship_placement(p)]
+        # if not placements:
+        #     return {}
         
-        # find all untargeted coords that are in the valid placements
-        coords = []
-        for p in placements:
-            valid_coords = [coord for coord in p.coords() 
-                            if (board.target_grid[coord] 
-                                == constants.TargetValue.UNKNOWN)]
-            coords.extend(valid_coords)
-        coords = list(set(coords))
+        # # find all untargeted coords that are in the valid placements
+        # coords = []
+        # for p in placements:
+        #     valid_coords = [coord for coord in p.coords() 
+        #                     if (board.target_grid[coord] 
+        #                         == constants.TargetValue.UNKNOWN)]
+        #     coords.extend(valid_coords)
+        # coords = list(set(coords))
+        
+        for hit in reversed(self.open_hits(board, outcome_history)):
+            # find placements that overlap the open_hit in question
+            placements = board.placements_containing_coord(hit, 
+                                                           ship_types=afloat_ships)
+            # Eliminate placements that do not contain only unknowns 
+            # and unresolved hits
+            placements = [p for p in placements 
+                          if board.is_valid_target_ship_placement(p)]
+        
+            # find all untargeted coords that are in the valid placements
+            coords = []
+            for p in placements:
+                valid_coords = [coord for coord in p.coords() 
+                                if (board.target_grid[coord] 
+                                    == constants.TargetValue.UNKNOWN)]
+                coords.extend(valid_coords)
+                
+            # if valid target coords are found, break the loop and return 
+            if coords:
+                coords = list(set(coords))
+                break
+            
         
         # if variable probability is not required, just return the coords 
         # with uniform probability
@@ -1070,6 +1447,33 @@ class HunterOffense(Offense):
     def kill_targets_from_shape(self, 
                                 board=None, 
                                 outcome_history=None):
+        """
+        Determines kill target based on the shape of hits already on the board.
+        
+        Parameters
+        ----------
+        board : Board
+            The board whose target grid (vertical grid) should be used to
+            determinate a kill target coordinate.
+        outcome_history : list
+            A list of outcome dictionaries, with most recent outcome last.
+            
+            Each element of outcome_history should be a dictionary with the 
+            following key/value pairs:
+                'coord': tuple (row, col); the targeted coordinate.
+                'hit': bool; True if shot hit a ship.
+                'sunk': bool; True if shot resulted in sinking a ship.
+                'sunk_ship_type': ShipType; the reported type of the hit ship, 
+                    if a ship was sunk. None if no ship was sunk.
+                'inferred_ship_type': ShipType; for future use.
+            
+        Returns
+        -------
+        targets_with_probs : dict
+            A dictionary with keys equal to each possible target tuple (i.e.,
+            a (row,col) tuple) and value equal to the probability that the 
+            Hunter should choose that coordinate as its target.
+        """
         
         #** For debug purposes only **
         if board == None:
@@ -1111,6 +1515,14 @@ class HunterOffense(Offense):
                 # than one was located
                 if len(targets) == 2:
                     targets = [targets[-1]]
+                elif len(targets) == 0:
+                    # Probably a case of one hit on each of two parallel ships;
+                    # Look for targets around any of the open hits, starting
+                    # with most recent.
+                    for hit in reversed(open_hits):
+                        targets = board.targets_around(hit, untargeted=True)
+                        if targets:
+                            break
                 
             # If two adjacent hits were NOT found, find an arbitrary target
             # around any of the open hits (prefer the more recent ones).
@@ -1126,6 +1538,7 @@ class HunterOffense(Offense):
         else:
             targets_with_probs = {}
         return targets_with_probs
+    
     
     def targets_along(self, 
                       first_hit, 
@@ -1147,7 +1560,6 @@ class HunterOffense(Offense):
         If the line has targets at both ends, the first one will be the one
         closer to first_hit.
         
-
         Parameters
         ----------
         first_hit : tuple
@@ -1158,14 +1570,13 @@ class HunterOffense(Offense):
             DESCRIPTION. The default is None.
         outcome_history : TYPE, optional
             DESCRIPTION. The default is None.
-
+            
         Returns
         -------
         targets : list
             A list with zero, one, or two coordinate tuples. Each tuple is 
             an untargeted coordinate at the end of the line defined by the
             two input hit coordinates.
-
         """
         
         #** For debug purposes only **
@@ -1221,21 +1632,22 @@ class HunterOffense(Offense):
         Returns the list of hits on the board's target grid that have not
         been assigned to a particular ship type. The list is ordered such
         that the most recent hit is last.
-
+        
         Returns
         -------
         hits : list
             A list of target coordinates (tuples) for hits that cannot be
             assigned to a particular type of ship.
-
         """
+        
         #** For debug purposes only **
         if board == None:
             board = self.board
         if outcome_history == None:
             outcome_history = self.outcome_history
         # *** ^^^^^^^^ ***
-        open_hits = [outcome['coord'] for outcome in reversed(outcome_history)
+        
+        open_hits = [outcome['coord'] for outcome in outcome_history
                      if (board.target_grid[outcome['coord']] 
                          == constants.TargetValue.HIT)]
         return open_hits
@@ -1247,7 +1659,7 @@ class HunterOffense(Offense):
         hit that cannot be assigned to a particular ship type.
         
         If there are no open hits on the board, None is returned.
-
+        
         Parameters
         ----------
         board : Board, optional
@@ -1257,13 +1669,12 @@ class HunterOffense(Offense):
             The history list in which outcomes are recorded. The default is 
             None, in which case the Hunter's outcome_history property is used 
             (if it exists).
-
+            
         Returns
         -------
         hit : tuple (row,col)
             The (row,col) of the most recent open hit, or None if no such
             hit exists.
-
         """
         #** For debug purposes only **
         if board == None:
@@ -1285,24 +1696,25 @@ class HunterOffense(Offense):
     def last_target(self, outcome_history=None):
         """
         Returns the coordinate of the last targeted spot on the board.
-
+        
         Parameters
         ----------
         outcome_history : list, optional
             The history list in which outcomes are recorded. The default is 
             None, in which case the Hunter's outcome_history property is used 
             (if it exists).
-
+            
         Returns
         -------
         target : tuple (row,col)
             The (row,col) of the most recent targeted coordinate.
-
         """
+        
         #** For debug purposes only **
         if outcome_history == None:
             outcome_history = self.outcome_history
         # *** ^^^^^^^^ ***
+        
         if outcome_history:
             target = outcome_history[-1]['coord']
         else:
@@ -1313,18 +1725,17 @@ class HunterOffense(Offense):
     def last_hit(self, outcome_history=None):
         """
         Returns the coordinate of the most recent shot that resulted in a hit.
-
+        
         Parameters
         ----------
         outcome_history : list
             Ordered list of outcome dictionaries.
-
+            
         Returns
         -------
         hit_coord : tuple
             Two-element (row,col) tuple where the Hunter last hit a target on
             the opponent's board. If no hits have been scored, returns None.
-
         """
         #** For debug purposes only **
         if outcome_history == None:
@@ -1349,7 +1760,7 @@ class HunterOffense(Offense):
         """
         Translates input options dict into a standard format, and adds default
         values to the options dict.
-
+        
         Parameters
         ----------
         hunt_style : str
@@ -1362,7 +1773,6 @@ class HunterOffense(Offense):
             Note that any keys beyond those noted below will also be included
             in the returned options dict.
             
-
         Returns
         -------
         options : dict.
@@ -1424,6 +1834,7 @@ class HunterOffense(Offense):
                         dist_to methods for specifics.
                         
         """
+        
         new_options = {
             'edge_buffer': 0,
             'ship_buffer': 0,
@@ -1437,6 +1848,7 @@ class HunterOffense(Offense):
             'user_data': None,
             'note': None,
             }
+        
         for k in new_options:
             if k not in options:
                 options[k] = new_options[k]
@@ -1449,7 +1861,7 @@ class HunterOffense(Offense):
         """
         Translates input options dict into a standard format, and adds default
         values to the options dict.
-
+        
         Parameters
         ----------
         options : dict
@@ -1458,7 +1870,6 @@ class HunterOffense(Offense):
             Note that any keys beyond those noted below will also be included
             in the returned options dict.
             
-
         Returns
         -------
         options : dict.
@@ -1469,16 +1880,18 @@ class HunterOffense(Offense):
                                 'advanced' takes possible placements of every
                                 remaining ship into account to generate a 
                                 probability around the most recent hit.
-
         """
+        
         new_options = {
             'method': 'advanced',
             'user_data': None,
             'note': None,
             }
+        
         for k in new_options:
             if k not in options:
                 options[k] = new_options[k]
             if isinstance(options[k], str):
                 options[k] = options[k].lower()
+                
         return options
