@@ -390,7 +390,7 @@ class Viz:
        
         
     @staticmethod
-    def show_player_history(player):
+    def show_player_history(player, annotate=None):
         """
         Shows the incoming and outgoing shot history of the player, with 
         each hit/miss on the target board annotated with the turn in which it 
@@ -400,6 +400,13 @@ class Viz:
         ----------
         player : Player
             The player whose history will be shown.
+        annotate : str
+            A string indicating how shots are annotated. Options are:
+                'all' : The turn number will be drawn on each shot, hit or miss.
+                'hits' : Turn number will be drawn only on hits.
+                'smart' : Turn number will be drawn on shots taken once a ship
+                            has been found until a ship is sunk
+                'none' : No turn number annotation (default)
 
         Returns
         -------
@@ -412,19 +419,46 @@ class Viz:
         ax = axs[0]
         text_color = {'hit': 'white', 'miss': 'black', 'sink': 'black'}
         
-        for (turn, outcome) in enumerate(player.outcome_history):
-            coord = outcome['coord']
-            x = coord[1] + 1.
-            y = coord[0] + 1.
-            result = ('sink' if outcome['sunk'] 
-                      else 'hit' if outcome['hit']
-                      else 'miss')
-            ax.text(x, y + 0.02, f"{turn + 1}", 
-                    color = text_color[result],
-                    fontsize = 'x-small',
-                    fontweight = 'normal',
-                    horizontalalignment = 'center',
-                    verticalalignment = 'center')
+        if annotate and annotate.lower() != 'none':
+            annotate = annotate.lower()
+            kill_mode = False  # for 'smart' annotation
+            for (turn, outcome) in enumerate(player.outcome_history):
+                coord = outcome['coord']
+                x = coord[1] + 1.
+                y = coord[0] + 1.
+                result = ('sink' if outcome['sunk'] 
+                          else 'hit' if outcome['hit']
+                          else 'miss')
+                if annotate == 'all':
+                    pass
+                elif annotate == 'hits':
+                    if result == 'miss':
+                        result = None
+                elif annotate == 'smart':
+                    if kill_mode:
+                        #if result == 'hit':
+                        #    pass
+                        #elif result == 'miss':
+                        #    pass
+                        if result == 'sink':
+                            kill_mode = False
+                    else:
+                        if result == 'hit':
+                            kill_mode = True
+                        elif result == 'miss':
+                            result = None
+                        #elif result == 'sink':
+                        #    kill_mode = False
+                else:
+                    raise ValueError('annotate parameter must be "all", '
+                                     ' "hits", "smart", or "none".')
+                if result:
+                    ax.text(x, y + 0.02, f"{turn + 1}", 
+                            color = text_color[result],
+                            fontsize = 'x-small',
+                            fontweight = 'normal',
+                            horizontalalignment = 'center',
+                            verticalalignment = 'center')
         
         return fig
         
@@ -648,7 +682,8 @@ class Viz:
                              fill=False, color='orange', alpha=None,
                              other_coords = None,
                              other_color = 'indigo',
-                             other_fill = None):
+                             other_fill = None,
+                             show_order=False):
         """
         Shows the input board with the input coordinates overlaid as circles.
         Useful for visualizing where coordinates are in relation to the 
@@ -683,6 +718,10 @@ class Viz:
         other_fill : bool, optional
             Same behavior as the 'bool' input, but applies to the other_coords
             list of coordinates. Defaults to the same value as fill.
+        show_order : bool, optional
+            If True, a label indicating each coordinate's order in the coords
+            parameter is placed next to each coordinat's circle. Default is 
+            False.
 
         Returns
         -------
@@ -706,7 +745,7 @@ class Viz:
             Viz.add_ocean_grid(ax, board)
 
         fig.set_facecolor(Viz.bg_color)
-        for coord in coords:
+        for (idx, coord) in enumerate(coords):
             x = coord[1] + 1    # coord is stored as 0-indexed (row,col)
             y = coord[0] + 1
             ax.add_patch(plt.Circle(xy = (x,y), 
@@ -718,6 +757,10 @@ class Viz:
                                     linestyle = '-',
                                     linewidth = line_width)
                          )
+            if show_order:
+                ax.text(x, y, idx+1, color = color,
+                        verticalalignment = 'center',
+                        horizontalalignment = 'center')
         if other_coords:
             for coord in other_coords:
                 x = coord[1] + 1    # coord is stored as 0-indexed (row,col)
@@ -731,6 +774,10 @@ class Viz:
                                         linestyle = '-',
                                         linewidth = line_width)
                              )
+                if show_order:
+                    ax.text(x, y, idx+1, color = other_color,
+                            verticalalignment = 'center',
+                            horizontalalignment = 'center')
         return fig
         
     
@@ -879,6 +926,54 @@ class Viz:
         fig.set_facecolor(Viz.bg_color)
         
         
+    @staticmethod
+    def print_player_history(player, turns=None, show_board=False):
+        """
+        Prints a list of player open hits, target probabilities, target 
+        selection, and outcomes.
+
+        Parameters
+        ----------
+        player : Player
+            A player with board and outcome_history properties.
+        turns : int
+            The number of turns to show (defaults to all turns)
+        show_board : bool
+            If True, the target grid will be shown at every turn.
+            
+        Returns
+        -------
+        None.
+
+        """
+        if turns is None:
+            turns = len(player.outcome_history)
+            
+        board = player.board.copy()
+        board._target_grid = (constants.TargetValue.UNKNOWN 
+                              * np.ones((board.size, board.size)))
+        
+        for (turn, outcome) in enumerate(player.outcome_history):
+            if outcome['hit']:
+                if outcome['sunk_ship_type']:
+                    result = (f"HIT - "
+                              f"{Ship.data[outcome['sunk_ship_type']]['name']} "
+                              f"SANK")
+                result = 'HIT'
+            else:
+                result = 'MISS'
+            print(f"\nTurn {turn+1}")
+            if show_board:
+                print(outcome)
+                board.update_target_grid(outcome)
+                print(board.color_str('target'))
+            print(f"Open hits: {player.offense.open_hits()}")
+            # The below call to target sets the target_probs property up to turn
+            player.offense.target(board, player.outcome_history[:turn])
+            print(f"Possible targets: {player.offense.target_probs}")
+            print(f"Target: {outcome['coord']}")
+            print(f"Outcome: {result}")
+            
     @staticmethod
     def plot_results_summary(results):
         """
@@ -1245,22 +1340,3 @@ class Viz:
                       for k in p2_total.keys()]
         axs[pos].bar(bins, p1_percent, color=p1_color, alpha=0.7)
         axs[pos].bar(bins, p2_percent, color=p2_color, alpha=0.7)
-        
-#%%
-
-# import os
-# os.chdir('Code/Python')
-# import battleship as bs
-# game = bs.game.Game(
-#     bs.player.AIPlayer(bs.offense.HunterOffense('random', 
-#         kill_options={'method':'advanced'}), 
-#                        bs.defense.RandomDefense('random'), 
-#                        name = "Bandit"),
-#     bs.player.AIPlayer(bs.offense.HunterOffense('random', 
-#         kill_options={'method':'advanced'}), 
-#                        bs.defense.RandomDefense('random'), 
-#                        name = "Chili"),
-#     "0001")
-# game.setup()
-# game.play()
-    
