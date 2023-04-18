@@ -1797,7 +1797,7 @@ class Board:
         return rects
         
     
-    def color_str(self):
+    def color_str(self, grid='both'):
         """
         Returns a string in color that represents the state of the board.
         to a human player.
@@ -1815,6 +1815,11 @@ class Board:
                 s += "*"
             return s
         
+        if grid.lower() == 'both':
+            grid = ('target', 'ocean')
+        else:
+            grid = (grid.lower(), )
+            
         ocean = "\x1b[1;44;31m "
         ship_hit = "\x1b[1;41;37m"
         ship_no_hit = "\x1b[2;47;30m"
@@ -1825,27 +1830,30 @@ class Board:
         s = "\n  "
         s += (" ".join([str(x) for x in np.arange(self.size) + 1]) 
               + "\n")
-        for (r,row) in enumerate(self.target_grid):
-            s += (Coord(r,0).lbl[0]
-                  + " "
-                  + " ".join([ocean if x == constants.TargetValue.UNKNOWN else 
-                              white_peg if x == constants.TargetValue.MISS else
-                              red_peg if x == constants.TargetValue.HIT else 
-                              (red_peg_sunk + format_target_id(x)) 
-                              for x in row]) 
-                  + "\033[0;0m\n")
-        s += ("\n  " 
-              + " ".join([str(x) for x in np.arange(self.size) + 1]) 
-              + "\n")
-        for (r,row) in enumerate(self.ocean_grid):
-            s += (Coord(r,0).lbl[0]
-                  + " "
-                  + " ".join([ocean if x == 0 else 
-                              (ship_hit + str(x)) if 
-                              self.damage_at_coord((r,c)) > 0 else
-                              (ship_no_hit + str(x)) 
-                              for (c,x) in enumerate(row)]) 
-                  + "\033[0;0m\n")
+        if 'target' in grid:
+            for (r,row) in enumerate(self.target_grid):
+                s += (Coord(r,0).lbl[0]
+                      + " "
+                      + " ".join([ocean if x == constants.TargetValue.UNKNOWN else 
+                                  white_peg if x == constants.TargetValue.MISS else
+                                  red_peg if x == constants.TargetValue.HIT else 
+                                  (red_peg_sunk + format_target_id(x)) 
+                                  for x in row]) 
+                      + "\033[0;0m\n")
+            s += ("\n  " 
+                  + " ".join([str(x) for x in np.arange(self.size) + 1]) 
+                  + "\n")
+            
+        if 'ocean' in grid:
+            for (r,row) in enumerate(self.ocean_grid):
+                s += (Coord(r,0).lbl[0]
+                      + " "
+                      + " ".join([ocean if x == 0 else 
+                                  (ship_hit + str(x)) if 
+                                  self.damage_at_coord((r,c)) > 0 else
+                                  (ship_no_hit + str(x)) 
+                                  for (c,x) in enumerate(row)]) 
+                      + "\033[0;0m\n")
         return s
     
     
